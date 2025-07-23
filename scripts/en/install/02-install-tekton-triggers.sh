@@ -1,7 +1,8 @@
 #!/bin/bash
 
-# Tekton Triggers 安装和配置脚本
-# 支持 GitHub webhook 触发 Pipeline
+# Tekton Triggers 自动化安装和配置脚本 - 阶段二
+# 安装 Triggers + GitHub Webhook 集成
+# 以生产环境最佳实践为目标
 
 set -e
 
@@ -11,13 +12,17 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 配置变量
-NAMESPACE="tekton-pipelines"
-GITHUB_SECRET="110120119"
+TEKTON_NAMESPACE="tekton-pipelines"
+NODE_IP="10.117.8.154"
+TEKTON_DOMAIN="tekton.${NODE_IP}.nip.io"
+WEBHOOK_URL="http://${TEKTON_DOMAIN}/webhook"
 GITHUB_REPO_URL="https://github.com/johnnynv/tekton-poc"
-WEBHOOK_DOMAIN="tekton.10.117.8.154.nip.io"
+GITHUB_SECRET="110120119"
+TIMEOUT="600s"
 
 log_info() {
     echo -e "${BLUE}[INFO]${NC} $1"

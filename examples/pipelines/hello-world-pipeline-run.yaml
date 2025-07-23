@@ -1,0 +1,11 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: hello-world-run-
+  namespace: tekton-pipelines
+  labels:
+    app: tekton-example
+    type: manual-test
+spec:
+  pipelineRef:
+    name: hello-world-pipeline 

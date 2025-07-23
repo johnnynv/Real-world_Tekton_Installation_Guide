@@ -1,0 +1,12 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: hello-world-pipeline
+  namespace: tekton-pipelines
+spec:
+  description: |
+    Simple hello world pipeline for testing Tekton installation
+  tasks:
+  - name: say-hello
+    taskRef:
+      name: hello-world 
