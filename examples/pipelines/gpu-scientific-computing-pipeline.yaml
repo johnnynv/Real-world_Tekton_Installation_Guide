@@ -1,0 +1,375 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: gpu-scientific-computing-pipeline
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing-pipeline
+    app.kubernetes.io/component: tekton-pipeline
+    app.kubernetes.io/version: "1.0.0"
+    tekton.dev/pipeline-type: "scientific-computing"
+spec:
+  description: |
+    GPU-accelerated scientific computing pipeline for processing Jupyter notebooks.
+    
+    This pipeline performs the following steps:
+    1. Environment preparation and code checkout
+    2. GPU-accelerated notebook execution with Papermill
+    3. Notebook to HTML conversion using Jupyter nbconvert
+    4. Automated testing with PyTest framework
+    
+    Equivalent to the original GitHub Actions workflow but running on Tekton with GPU support.
+  
+  params:
+  # Source repository parameters
+  - name: git-repo-url
+    description: Git repository URL containing the notebook to execute
+    type: string
+  - name: git-revision
+    description: Git revision to checkout (commit hash, branch, or tag)
+    type: string
+    default: "main"
+  
+  # Notebook execution parameters
+  - name: notebook-path
+    description: Path to the notebook file (relative to repository root)
+    type: string
+    default: "notebooks/01_scRNA_analysis_preprocessing.ipynb"
+  - name: output-notebook-name
+    description: Name for the executed notebook output
+    type: string
+    default: "executed_notebook.ipynb"
+  - name: output-html-name
+    description: Name for the HTML conversion output
+    type: string
+    default: "executed_notebook.html"
+  
+  # GPU and resource parameters
+  - name: gpu-count
+    description: Number of GPUs required for notebook execution
+    type: string
+    default: "1"
+  - name: gpu-memory-limit
+    description: Memory limit for GPU containers
+    type: string
+    default: "32Gi"
+  - name: gpu-cpu-limit
+    description: CPU limit for GPU containers
+    type: string
+    default: "8"
+  - name: container-image
+    description: GPU-enabled container image for notebook execution
+    type: string
+    default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  
+  # Testing parameters
+  - name: test-repo-url
+    description: URL of the test framework repository
+    type: string
+    default: "https://github.com/NVIDIA-AI-Blueprints/blueprint-github-test.git"
+  - name: pytest-markers
+    description: PyTest markers to run
+    type: string
+    default: "single_cell"
+  
+  # Pipeline behavior parameters
+  - name: verbose-logging
+    description: Enable verbose logging throughout the pipeline
+    type: string
+    default: "true"
+  - name: continue-on-test-failure
+    description: Continue pipeline even if tests fail
+    type: string
+    default: "true"
+  
+  workspaces:
+  - name: source-code-workspace
+    description: Workspace for source code checkout and processing
+  - name: shared-artifacts-workspace
+    description: Shared workspace for artifacts between tasks
+  - name: gpu-cache-workspace
+    description: GPU computation cache workspace for performance optimization
+  - name: test-execution-workspace
+    description: Workspace for test framework and execution
+  
+  results:
+  - name: pipeline-status
+    description: Overall pipeline execution status
+    value: $(tasks.publish-results.results.final-status)
+  - name: notebook-execution-time
+    description: Time taken for notebook execution
+    value: $(tasks.execute-notebook-gpu.results.execution-time)
+  - name: test-results-summary
+    description: Summary of test execution results
+    value: $(tasks.run-tests.results.test-status)
+  - name: artifact-locations
+    description: Locations of generated artifacts
+    value: "Coverage: $(tasks.run-tests.results.coverage-xml-path), JUnit: $(tasks.run-tests.results.pytest-xml-path), HTML Report: $(tasks.run-tests.results.report-html-path)"
+  
+  tasks:
+  # Task 1: Environment preparation and code checkout
+  - name: prepare-environment
+    taskRef:
+      name: gpu-env-preparation
+    params:
+    - name: git-repo-url
+      value: $(params.git-repo-url)
+    - name: git-revision
+      value: $(params.git-revision)
+    - name: verbose
+      value: $(params.verbose-logging)
+    workspaces:
+    - name: source-code
+      workspace: source-code-workspace
+    - name: shared-storage
+      workspace: shared-artifacts-workspace
+  
+  # Task 2: GPU-accelerated notebook execution (depends on environment preparation)
+  - name: execute-notebook-gpu
+    taskRef:
+      name: gpu-papermill-execution
+    runAfter: ["prepare-environment"]
+    params:
+    - name: notebook-path
+      value: $(params.notebook-path)
+    - name: output-notebook-name
+      value: $(params.output-notebook-name)
+    - name: container-image
+      value: $(params.container-image)
+    - name: gpu-count
+      value: $(params.gpu-count)
+    - name: memory-limit
+      value: $(params.gpu-memory-limit)
+    - name: cpu-limit
+      value: $(params.gpu-cpu-limit)
+    workspaces:
+    - name: shared-storage
+      workspace: shared-artifacts-workspace
+    - name: gpu-cache
+      workspace: gpu-cache-workspace
+  
+  # Task 3: Convert notebook to HTML (depends on notebook execution)
+  - name: convert-to-html
+    taskRef:
+      name: jupyter-nbconvert
+    runAfter: ["execute-notebook-gpu"]
+    params:
+    - name: input-notebook-name
+      value: $(params.output-notebook-name)
+    - name: output-html-name
+      value: $(params.output-html-name)
+    - name: embed-images
+      value: "true"
+    workspaces:
+    - name: shared-storage
+      workspace: shared-artifacts-workspace
+  
+  # Task 4: Run PyTest tests (depends on HTML conversion)
+  - name: run-tests
+    taskRef:
+      name: pytest-execution
+    runAfter: ["convert-to-html"]
+    params:
+    - name: test-repo-url
+      value: $(params.test-repo-url)
+    - name: html-input-file
+      value: $(params.output-html-name)
+    - name: pytest-markers
+      value: $(params.pytest-markers)
+    workspaces:
+    - name: shared-storage
+      workspace: shared-artifacts-workspace
+    - name: test-workspace
+      workspace: test-execution-workspace
+  
+  # Task 5: Publish results and cleanup (final task)
+  - name: publish-results
+    runAfter: ["run-tests"]
+    taskSpec:
+      params:
+      - name: continue-on-failure
+        type: string
+      workspaces:
+      - name: artifacts
+        description: Workspace containing all generated artifacts
+      results:
+      - name: final-status
+        description: Final pipeline status
+      steps:
+      - name: collect-artifacts
+        image: alpine:latest
+        env:
+        - name: WORKSPACE_PATH
+          value: $(workspaces.artifacts.path)
+        script: |
+          #!/bin/sh
+          set -eu
+          
+          echo "📦 Collecting and validating final artifacts..."
+          cd "${WORKSPACE_PATH}"
+          
+          ARTIFACTS_DIR="artifacts"
+          
+          # Check for required artifacts
+          REQUIRED_FILES="executed_notebook.ipynb executed_notebook.html coverage.xml pytest_results.xml pytest_report.html"
+          ALL_PRESENT=true
+          
+          echo "🔍 Checking for required artifacts:"
+          for file in $REQUIRED_FILES; do
+            if [ -f "${ARTIFACTS_DIR}/${file}" ]; then
+              SIZE=$(du -h "${ARTIFACTS_DIR}/${file}" | cut -f1)
+              echo "✅ ${file} (${SIZE})"
+            else
+              echo "❌ ${file} - MISSING"
+              ALL_PRESENT=false
+            fi
+          done
+          
+          # Generate artifacts summary
+          echo "📊 Generating artifacts summary..."
+          cat > "${ARTIFACTS_DIR}/pipeline_summary.txt" << EOF
+Pipeline Execution Summary
+==========================
+Execution Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+Git Repository: $(params.git-repo-url)
+Git Revision: $(params.git-revision)
+Notebook Path: $(params.notebook-path)
+GPU Count: $(params.gpu-count)
+Container Image: $(params.container-image)
+
+Generated Artifacts:
+EOF
+          
+          echo "📁 Final artifacts directory structure:"
+          find "${ARTIFACTS_DIR}" -type f -exec ls -lh {} \; | sort
+          
+          # Determine final status
+          if [ "$ALL_PRESENT" = true ]; then
+            if [ "$(params.continue-on-failure)" = "true" ]; then
+              echo "✅ Pipeline completed successfully with all artifacts generated"
+              echo -n "success" > "$(results.final-status.path)"
+            else
+              # Check test results to determine final status
+              if [ -f "${ARTIFACTS_DIR}/pytest_execution.log" ]; then
+                if grep -q "FAILED\|ERROR" "${ARTIFACTS_DIR}/pytest_execution.log"; then
+                  echo "⚠️  Pipeline completed but tests had failures"
+                  echo -n "completed_with_test_failures" > "$(results.final-status.path)"
+                else
+                  echo "✅ Pipeline completed successfully"
+                  echo -n "success" > "$(results.final-status.path)"
+                fi
+              else
+                echo "✅ Pipeline completed successfully"
+                echo -n "success" > "$(results.final-status.path)"
+              fi
+            fi
+          else
+            echo "❌ Pipeline completed but some artifacts are missing"
+            echo -n "completed_with_missing_artifacts" > "$(results.final-status.path)"
+          fi
+          
+      - name: prepare-for-upload
+        image: alpine:latest
+        env:
+        - name: WORKSPACE_PATH
+          value: $(workspaces.artifacts.path)
+        script: |
+          #!/bin/sh
+          set -eu
+          
+          echo "📤 Preparing artifacts for upload/storage..."
+          cd "${WORKSPACE_PATH}"
+          
+          ARTIFACTS_DIR="artifacts"
+          UPLOAD_DIR="upload"
+          
+          # Create upload directory structure
+          mkdir -p "${UPLOAD_DIR}/reports" "${UPLOAD_DIR}/notebooks" "${UPLOAD_DIR}/logs"
+          
+          # Organize artifacts for upload
+          if [ -f "${ARTIFACTS_DIR}/executed_notebook.ipynb" ]; then
+            cp "${ARTIFACTS_DIR}/executed_notebook.ipynb" "${UPLOAD_DIR}/notebooks/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/executed_notebook.html" ]; then
+            cp "${ARTIFACTS_DIR}/executed_notebook.html" "${UPLOAD_DIR}/reports/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/coverage.xml" ]; then
+            cp "${ARTIFACTS_DIR}/coverage.xml" "${UPLOAD_DIR}/reports/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/pytest_results.xml" ]; then
+            cp "${ARTIFACTS_DIR}/pytest_results.xml" "${UPLOAD_DIR}/reports/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/pytest_report.html" ]; then
+            cp "${ARTIFACTS_DIR}/pytest_report.html" "${UPLOAD_DIR}/reports/"
+          fi
+          
+          # Copy log files
+          if [ -f "${ARTIFACTS_DIR}/papermill.log" ]; then
+            cp "${ARTIFACTS_DIR}/papermill.log" "${UPLOAD_DIR}/logs/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/jupyter_nbconvert.log" ]; then
+            cp "${ARTIFACTS_DIR}/jupyter_nbconvert.log" "${UPLOAD_DIR}/logs/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/pytest_execution.log" ]; then
+            cp "${ARTIFACTS_DIR}/pytest_execution.log" "${UPLOAD_DIR}/logs/"
+          fi
+          
+          if [ -f "${ARTIFACTS_DIR}/pipeline_summary.txt" ]; then
+            cp "${ARTIFACTS_DIR}/pipeline_summary.txt" "${UPLOAD_DIR}/"
+          fi
+          
+          echo "📁 Upload directory structure:"
+          find "${UPLOAD_DIR}" -type f -exec ls -lh {} \; | sort
+          
+          # Create a compressed archive (optional)
+          echo "📦 Creating compressed archive..."
+          tar -czf "pipeline_artifacts_$(date +%Y%m%d_%H%M%S).tar.gz" -C "${UPLOAD_DIR}" .
+          
+          echo "✅ Artifacts prepared for upload"
+          echo "🎉 GPU Scientific Computing Pipeline completed!"
+          
+    params:
+    - name: continue-on-failure
+      value: $(params.continue-on-test-failure)
+    workspaces:
+    - name: artifacts
+      workspace: shared-artifacts-workspace
+      
+  # Pipeline-level error handling (optional)
+  finally:
+  - name: cleanup-on-failure
+    taskSpec:
+      workspaces:
+      - name: cleanup-workspace
+        description: Workspace to clean up
+      steps:
+      - name: cleanup
+        image: alpine:latest
+        env:
+        - name: WORKSPACE_PATH
+          value: $(workspaces.cleanup-workspace.path)
+        script: |
+          #!/bin/sh
+          set -eu
+          
+          echo "🧹 Performing pipeline cleanup..."
+          cd "${WORKSPACE_PATH}"
+          
+          # Clean up temporary files but preserve artifacts
+          echo "📁 Workspace contents before cleanup:"
+          du -sh * 2>/dev/null || echo "No files to show"
+          
+          # Remove large temporary files but keep logs and artifacts
+          find . -name "*.tmp" -type f -delete 2>/dev/null || true
+          find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+          
+          echo "✅ Cleanup completed"
+    workspaces:
+    - name: cleanup-workspace
+      workspace: gpu-cache-workspace 

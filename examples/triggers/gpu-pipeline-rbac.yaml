@@ -1,0 +1,168 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tekton-triggers-gpu-sa
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-triggers-gpu
+    app.kubernetes.io/component: serviceaccount
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-triggers-gpu-role
+  labels:
+    app.kubernetes.io/name: tekton-triggers-gpu
+    app.kubernetes.io/component: clusterrole
+rules:
+# Tekton Pipelines permissions
+- apiGroups: ["tekton.dev"]
+  resources: ["pipelines", "pipelineruns", "tasks", "taskruns"]
+  verbs: ["get", "list", "create", "update", "patch", "watch"]
+
+# Tekton Triggers permissions
+- apiGroups: ["triggers.tekton.dev"]
+  resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers"]
+  verbs: ["get", "list", "create", "update", "patch", "watch"]
+
+# Core Kubernetes resources
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"]
+  verbs: ["get", "list", "create", "update", "patch", "watch", "delete"]
+
+# GPU and resource management
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+
+# Storage classes for dynamic provisioning
+- apiGroups: ["storage.k8s.io"]
+  resources: ["storageclasses"]
+  verbs: ["get", "list", "watch"]
+
+# Extended resources for GPU scheduling
+- apiGroups: ["scheduling.k8s.io"]
+  resources: ["priorityclasses"]
+  verbs: ["get", "list", "watch"]
+
+# Custom resources for GPU operators (if using NVIDIA GPU Operator)
+- apiGroups: ["nvidia.com"]
+  resources: ["*"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-gpu-binding
+  labels:
+    app.kubernetes.io/name: tekton-triggers-gpu
+    app.kubernetes.io/component: clusterrolebinding
+subjects:
+- kind: ServiceAccount
+  name: tekton-triggers-gpu-sa
+  namespace: tekton-pipelines
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-gpu-role
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: tekton-triggers-gpu-namespace-role
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-triggers-gpu
+    app.kubernetes.io/component: role
+rules:
+# Additional namespace-specific permissions
+- apiGroups: [""]
+  resources: ["pods/log", "pods/status"]
+  verbs: ["get", "list", "watch"]
+
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+# Workspace and volume management
+- apiGroups: [""]
+  resources: ["persistentvolumes"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: tekton-triggers-gpu-namespace-binding
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-triggers-gpu
+    app.kubernetes.io/component: rolebinding
+subjects:
+- kind: ServiceAccount
+  name: tekton-triggers-gpu-sa
+  namespace: tekton-pipelines
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: tekton-triggers-gpu-namespace-role
+---
+# GitHub webhook secret (example)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-webhook-secret
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: github-webhook-secret
+    app.kubernetes.io/component: secret
+type: Opaque
+data:
+  webhook-secret: <BASE64_ENCODED_WEBHOOK_SECRET>  # Replace with your actual webhook secret
+---
+# GPU Priority Class for high-priority workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: gpu-high-priority
+  labels:
+    app.kubernetes.io/name: gpu-high-priority
+    app.kubernetes.io/component: priorityclass
+value: 1000
+globalDefault: false
+description: "High priority class for GPU scientific computing workloads"
+---
+# Storage classes for different performance tiers
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-ssd
+  labels:
+    app.kubernetes.io/name: fast-ssd
+    app.kubernetes.io/component: storageclass
+provisioner: kubernetes.io/aws-ebs  # Adjust for your cloud provider
+parameters:
+  type: gp3
+  iops: "3000"
+  throughput: "125"
+  fsType: ext4
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast-nvme
+  labels:
+    app.kubernetes.io/name: fast-nvme
+    app.kubernetes.io/component: storageclass
+provisioner: kubernetes.io/aws-ebs  # Adjust for your cloud provider
+parameters:
+  type: io2
+  iops: "10000"
+  fsType: ext4
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true 

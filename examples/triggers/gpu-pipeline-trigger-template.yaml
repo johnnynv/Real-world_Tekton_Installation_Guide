@@ -1,0 +1,236 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: gpu-scientific-computing-trigger-template
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing-trigger
+    app.kubernetes.io/component: tekton-trigger
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  params:
+  # Git repository parameters from webhook
+  - name: git-repo-url
+    description: Git repository URL from webhook payload
+  - name: git-revision
+    description: Git revision (commit SHA) from webhook
+  - name: git-repo-name
+    description: Repository name for labeling
+  - name: git-branch
+    description: Git branch reference
+    default: "refs/heads/main"
+  - name: git-author
+    description: Git commit author
+    default: "unknown"
+  - name: git-message
+    description: Git commit message
+    default: "No message provided"
+  
+  # Pipeline execution parameters
+  - name: notebook-path
+    description: Path to notebook file to execute
+    default: "notebooks/01_scRNA_analysis_preprocessing.ipynb"
+  - name: gpu-count
+    description: Number of GPUs to request
+    default: "1"
+  - name: gpu-memory-limit
+    description: GPU memory limit
+    default: "32Gi"
+  - name: priority-class
+    description: Priority class for GPU workloads
+    default: "gpu-high-priority"
+  
+  # Test configuration
+  - name: test-repo-url
+    description: Test framework repository URL
+    default: "https://github.com/NVIDIA-AI-Blueprints/blueprint-github-test.git"
+  - name: pytest-markers
+    description: PyTest markers to execute
+    default: "single_cell"
+  
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      generateName: gpu-scientific-computing-run-
+      namespace: tekton-pipelines
+      labels:
+        app: gpu-scientific-computing
+        trigger: github-webhook
+        repo: $(tt.params.git-repo-name)
+        branch: $(tt.params.git-branch)
+        gpu-pipeline: "true"
+      annotations:
+        tekton.dev/git-commit: $(tt.params.git-revision)
+        tekton.dev/git-branch: $(tt.params.git-branch)
+        tekton.dev/git-author: $(tt.params.git-author)
+        tekton.dev/git-message: $(tt.params.git-message)
+        tekton.dev/pipeline-type: "gpu-scientific-computing"
+        tekton.dev/resource-requirements: "gpu=$(tt.params.gpu-count),memory=$(tt.params.gpu-memory-limit)"
+    spec:
+      pipelineRef:
+        name: gpu-scientific-computing-pipeline
+      
+      # Pipeline parameters
+      params:
+      - name: git-repo-url
+        value: $(tt.params.git-repo-url)
+      - name: git-revision
+        value: $(tt.params.git-revision)
+      - name: notebook-path
+        value: $(tt.params.notebook-path)
+      - name: gpu-count
+        value: $(tt.params.gpu-count)
+      - name: gpu-memory-limit
+        value: $(tt.params.gpu-memory-limit)
+      - name: test-repo-url
+        value: $(tt.params.test-repo-url)
+      - name: pytest-markers
+        value: $(tt.params.pytest-markers)
+      - name: verbose-logging
+        value: "true"
+      - name: continue-on-test-failure
+        value: "true"
+      
+      # Workspaces configuration
+      workspaces:
+      - name: source-code-workspace
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 10Gi
+            storageClassName: fast-ssd
+      
+      - name: shared-artifacts-workspace
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 50Gi
+            storageClassName: fast-ssd
+      
+      - name: gpu-cache-workspace
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 100Gi
+            storageClassName: fast-nvme  # High-performance storage for GPU cache
+      
+      - name: test-execution-workspace
+        volumeClaimTemplate:
+          spec:
+            accessModes:
+              - ReadWriteOnce
+            resources:
+              requests:
+                storage: 5Gi
+            storageClassName: fast-ssd
+      
+      # Pipeline run specifications
+      timeout: "2h"  # Allow up to 2 hours for GPU computation
+      
+      # Node selector and tolerations for GPU nodes
+      podTemplate:
+        nodeSelector:
+          accelerator: nvidia-tesla-gpu
+        tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+        securityContext:
+          fsGroup: 0  # Required for some GPU workloads
+          runAsUser: 0
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: gpu-scientific-computing-trigger-binding
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing-trigger
+    app.kubernetes.io/component: tekton-trigger
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  params:
+  # Extract Git information from GitHub webhook payload
+  - name: git-repo-url
+    value: $(body.repository.clone_url)
+  - name: git-revision
+    value: $(body.head_commit.id)
+  - name: git-repo-name
+    value: $(body.repository.name)
+  - name: git-branch
+    value: $(body.ref)
+  - name: git-author
+    value: $(body.head_commit.author.name)
+  - name: git-message
+    value: $(body.head_commit.message)
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: gpu-scientific-computing-eventlistener
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing-eventlistener
+    app.kubernetes.io/component: tekton-eventlistener
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  triggers:
+  - name: gpu-scientific-computing-trigger
+    interceptors:
+    # GitHub webhook interceptor
+    - ref:
+        name: "github"
+      params:
+      - name: "secretRef"
+        value:
+          secretName: github-webhook-secret
+          secretKey: webhook-secret
+      - name: "eventTypes"
+        value: ["push", "pull_request"]
+    
+    # CEL interceptor for filtering
+    - ref:
+        name: "cel"
+      params:
+      - name: "filter"
+        value: >
+          (body.ref == 'refs/heads/main' || 
+           body.ref == 'refs/heads/develop' ||
+           body.pull_request.base.ref == 'main') &&
+          (body.head_commit.message.contains('[gpu]') ||
+           body.head_commit.message.contains('[notebook]') ||
+           body.head_commit.modified.exists(f, f.contains('notebooks/')) ||
+           body.head_commit.added.exists(f, f.contains('notebooks/')))
+      - name: "overlays"
+        value:
+        - key: "pipeline_trigger_reason"
+          expression: >
+            body.head_commit.message.contains('[gpu]') ? 'gpu_explicit' :
+            body.head_commit.message.contains('[notebook]') ? 'notebook_explicit' :
+            'notebook_file_changed'
+    
+    bindings:
+    - ref: gpu-scientific-computing-trigger-binding
+    
+    template:
+      ref: gpu-scientific-computing-trigger-template
+  
+  # EventListener service configuration
+  resources:
+    kubernetesResource:
+      serviceType: LoadBalancer  # or NodePort/ClusterIP based on your setup
+      servicePort: 8080
+      replicas: 2  # High availability
+      
+  # Security and resource configuration
+  serviceAccountName: tekton-triggers-gpu-sa 

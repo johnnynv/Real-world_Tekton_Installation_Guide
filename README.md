@@ -1,254 +1,260 @@
-# Tekton Production Installation Guide
+# Tekton Pipelines CLI (`tkn`)
 
-This guide provides a complete production-grade Tekton installation solution for Kubernetes clusters, implemented in two clear stages.
+[![Go Report Card](https://goreportcard.com/badge/tektoncd/cli)](https://goreportcard.com/report/tektoncd/cli)
+[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/6510/badge)](https://bestpractices.coreinfrastructure.org/projects/6510)
 
-## 📋 Deployment Architecture Overview
+<p align="center">
+<img width="250" height="175" src="https://github.com/cdfoundation/artwork/blob/main/tekton/additional-artwork/tekton-cli/color/tektoncli_color.svg" alt="Tekton logo"></img>
+</p>
 
-```
-Stage 1: Core Infrastructure         Stage 2: CI/CD Automation
-┌─────────────────────┐             ┌─────────────────────┐
-│  Ingress Controller │             │   GitHub Webhook    │
-│                     │             │                     │
-│  Tekton Pipelines   │ ──▶         │  Event Listeners    │
-│                     │             │                     │
-│  Tekton Dashboard   │             │  Trigger Bindings   │
-│                     │             │                     │
-│  Production Network │             │  Automated Pipeline │
-└─────────────────────┘             └─────────────────────┘
-```
+The _Tekton Pipelines CLI_ project provides a command-line interface (CLI) for interacting with [Tekton](https://tekton.dev/), an open-source framework for Continuous Integration and Delivery (CI/CD) systems.
 
-## 🎯 Deployment Objectives
+## Installing `tkn`
 
-- ✅ **Production Configuration**: Following Kubernetes best practices
-- ✅ **Network Security**: Ingress and IngressClass configuration
-- ✅ **High Availability**: Fault tolerance and monitoring setup
-- ✅ **Automated CI/CD**: GitHub webhook integration
-- ✅ **One-time Success**: Includes prevention and fixes for all known issues
+Download the latest binary executable for your operating system.
 
-## 📁 Project Structure
+### Mac OS X
 
-```
-Real-world_Tekton_Installation_Guide/
-├── README.md                               # Main documentation
-├── README-zh.md                            # Chinese documentation
-│
-├── 📁 docs/
-│   ├── en/                                 # English documentation
-│   │   ├── 01-tekton-core-installation.md
-│   │   ├── 02-tekton-triggers-setup.md
-│   │   └── troubleshooting.md
-│   └── zh/                                 # Chinese documentation
-│       ├── 01-tekton-core-installation.md
-│       ├── 02-tekton-triggers-setup.md
-│       └── troubleshooting.md
-│
-├── 📁 scripts/
-│   ├── en/                                 # English scripts
-│   │   ├── install/
-│   │   │   ├── 01-install-tekton-core.sh
-│   │   │   └── 02-install-tekton-triggers.sh
-│   │   ├── cleanup/
-│   │   │   ├── 01-cleanup-tekton-core.sh
-│   │   │   └── 02-cleanup-tekton-triggers.sh
-│   │   └── utils/
-│   │       ├── verify-installation.sh
-│   │       └── k8s-cluster-info.sh
-│   └── zh/                                 # Chinese scripts
-│       ├── install/
-│       ├── cleanup/
-│       └── utils/
-│
-└── 📁 examples/
-    ├── pipelines/                          # Example pipelines
-    ├── tasks/                              # Example tasks
-    └── triggers/                           # Example triggers
+- Use [Homebrew](https://brew.sh)
+
+```shell
+  brew install tektoncd-cli
 ```
 
-## 🚀 Quick Start
+- Use [released tarball](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Darwin_all.tar.gz)
 
-### Prerequisites
+  ```shell
+  # Get the tar.xz
+  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Darwin_all.tar.gz
+  # Extract tkn to your PATH (e.g. /usr/local/bin)
+  sudo tar xvzf tkn_0.40.0_Darwin_all.tar.gz -C /usr/local/bin tkn
+  ```
 
-- ✅ Kubernetes cluster (v1.20+)
-- ✅ kubectl command line tool
-- ✅ Cluster administrator privileges
-- ✅ Helm v3 (for Ingress Controller)
-- ✅ External node access capability
+### Windows
 
-### Stage 1: Core Infrastructure Deployment 📦
+- Use [Chocolatey](https://chocolatey.org/packages/tektoncd-cli)
 
-**Objective**: Install Tekton Pipelines + Dashboard with Web UI access
+```shell
+choco install tektoncd-cli --confirm
+```
 
-1. **Read Installation Guide**:
-   ```bash
-   cat docs/en/01-tekton-core-installation.md
+- Use [Scoop](https://scoop.sh)
+```powershell
+scoop install tektoncd-cli
+```
+
+- Use [Powershell](https://docs.microsoft.com/en-us/powershell) [released zip](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Windows_x86_64.zip)
+
+```powershell
+#Create directory
+New-Item -Path "$HOME/tektoncd/cli" -Type Directory
+# Download file
+Start-BitsTransfer -Source https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Windows_x86_64.zip -Destination "$HOME/tektoncd/cli/."
+# Uncompress zip file
+Expand-Archive $HOME/tektoncd/cli/*.zip -DestinationPath C:\Users\Developer\tektoncd\cli\.
+#Add to Windows `Environment Variables`
+[Environment]::SetEnvironmentVariable("Path",$($env:Path + ";$Home\tektoncd\cli"),'User')
+```
+
+### Linux tarballs
+
+* [Linux AMD 64](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_x86_64.tar.gz)
+
+  ```shell
+  # Get the tar.xz
+  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_x86_64.tar.gz
+  # Extract tkn to your PATH (e.g. /usr/local/bin)
+  sudo tar xvzf tkn_0.40.0_Linux_x86_64.tar.gz -C /usr/local/bin/ tkn
+  ```
+
+* [Linux AARCH 64](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_aarch64.tar.gz)
+
+  ```shell
+  # Get the tar.xz
+  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_aarch64.tar.gz
+  # Extract tkn to your PATH (e.g. /usr/local/bin)
+  sudo tar xvzf tkn_0.40.0_Linux_aarch64.tar.gz -C /usr/local/bin/ tkn
+  ```
+
+* [Linux IBM Z](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_s390x.tar.gz)
+
+  ```shell
+  # Get the tar.gz
+  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_s390x.tar.gz
+  # Extract tkn to your PATH (e.g. /usr/local/bin)
+  sudo tar xvzf tkn_0.40.0_Linux_s390x.tar.gz -C /usr/local/bin/ tkn
+  ```
+
+* [Linux IBM P](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_ppc64le.tar.gz)
+
+  ```shell
+  # Get the tar.gz
+  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_ppc64le.tar.gz
+  # Extract tkn to your PATH (e.g. /usr/local/bin)
+  sudo tar xvzf tkn_0.40.0_Linux_ppc64le.tar.gz -C /usr/local/bin/ tkn
+  ```
+
+### Linux RPMs
+
+  If you are running on any of the following rpm based distros:
+
+  * Latest Fedora and the two versions behind.
+  * Centos Stream
+  * EPEL
+  * Latest RHEL
+
+  you would be able to use [@chmouel](https://github.com/chmouel)'s unofficial copr package
+  repository by running the following commands:
+
+  ```shell
+  dnf copr enable chmouel/tektoncd-cli
+  dnf install tektoncd-cli
+  ```
+
+  * [Binary RPM package](https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.rpm)
+
+  On any other RPM based distros, you can install the rpm directly:
+
+   ```shell
+    rpm -Uvh https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.rpm
    ```
 
-2. **Clean Environment (if previously installed)**:
-   ```bash
-   chmod +x scripts/en/cleanup/01-cleanup-tekton-core.sh
-   ./scripts/en/cleanup/01-cleanup-tekton-core.sh
-   ```
+### Linux Debs
 
-3. **Automated Installation**:
-   ```bash
-   chmod +x scripts/en/install/01-install-tekton-core.sh
-   ./scripts/en/install/01-install-tekton-core.sh
-   ```
+  * [Ubuntu PPA](https://launchpad.net/~tektoncd/+archive/ubuntu/cli/+packages)
 
-4. **Verify Installation**:
-   ```bash
-   chmod +x scripts/en/utils/verify-installation.sh
-   ./scripts/en/utils/verify-installation.sh --stage=core
-   ```
+  If you are running on the latest rolling Ubuntu or Debian, you can use the TektonCD CLI PPA:
 
-5. **Access Dashboard**:
-   ```
-   http://tekton.YOUR_NODE_IP.nip.io/
-   ```
+  ```shell
+  sudo apt update;sudo apt install -y gnupg
+  sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3EFE0E0A2F2F60AA
+  echo "deb http://ppa.launchpad.net/tektoncd/cli/ubuntu oracular main"|sudo tee /etc/apt/sources.list.d/tektoncd-ubuntu-cli.list
+  sudo apt update && sudo apt install -y tektoncd-cli
+  ```
 
-### Stage 2: CI/CD Automation Configuration 🚀
+  The PPA may work with older releases, but that hasn't been tested.
 
-**Objective**: Configure GitHub Webhook to trigger automatic Pipeline execution
+  * [Binary DEB package](https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.deb)
 
-1. **Read Configuration Guide**:
-   ```bash
-   cat docs/en/02-tekton-triggers-setup.md
-   ```
+  On any other Debian or Ubuntu based distro, you can simply install the binary package directly with `dpkg`:
 
-2. **Clean Environment (if previously configured)**:
-   ```bash
-   chmod +x scripts/en/cleanup/02-cleanup-tekton-triggers.sh
-   ./scripts/en/cleanup/02-cleanup-tekton-triggers.sh
-   ```
+  ```shell
+  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.deb
+  dpkg -i tektoncd-cli-0.40.0_Linux-64bit.deb
+  ```
 
-3. **Automated Configuration**:
-   ```bash
-   chmod +x scripts/en/install/02-install-tekton-triggers.sh
-   ./scripts/en/install/02-install-tekton-triggers.sh
-   ```
+### NixOS/Nix
 
-4. **Verify Configuration**:
-   ```bash
-   ./scripts/en/utils/verify-installation.sh --stage=triggers
-   ```
+You can install `tektoncd-cli` from [nixpkgs](https://github.com/NixOS/nixpkgs) on any system that supports the `nix` package manager.
 
-5. **Test Automated Triggering**:
-   - Configure GitHub Webhook
-   - Push code to test automatic execution
+```shell
+nix-env --install tektoncd-cli
+```
+### Arch / Manjaro
 
-## 🏗️ Production Environment Features
+You can install [`tekton-cli`](https://archlinux.org/packages/extra/x86_64/tekton-cli/) from the official arch package repository :
 
-### Network and Security
-- ✅ **Ingress Controller**: Nginx production-grade configuration
-- ✅ **IngressClass**: Standardized routing rules
-- ✅ **Host Network**: Optimized network performance
-- ✅ **SSL Ready**: HTTPS configuration support
-- ✅ **External IPs**: Explicit external access configuration
+```shell
+pacman -S tekton-cli
+```
 
-### High Availability
-- ✅ **Resource Limits**: CPU/Memory limit configuration
-- ✅ **Health Checks**: Pod readiness and liveness probes
-- ✅ **Monitoring Ready**: Log and metrics integration
-- ✅ **Fault Recovery**: Automatic restart and recovery mechanisms
+### Homebrew on Linux
 
-### Permission Management
-- ✅ **RBAC**: Principle of least privilege
-- ✅ **Service Account**: Dedicated service accounts
-- ✅ **Pod Security**: Compliance with security standards
-- ✅ **Secret Management**: Secure sensitive information storage
+You can install the latest tektoncd-cli if you are using [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) as for the osx version you need to simply do :
 
-## 📊 Environment Information
+```shell
+brew install tektoncd-cli
+```
 
-| Component | Version/Configuration | Access URL |
-|-----------|----------------------|------------|
-| **Kubernetes** | v1.20+ | - |
-| **Tekton Pipelines** | latest | - |
-| **Tekton Dashboard** | latest | http://tekton.YOUR_NODE_IP.nip.io/ |
-| **Tekton Triggers** | latest | http://tekton.YOUR_NODE_IP.nip.io/webhook |
-| **Nginx Ingress** | latest | - |
-| **Namespace** | tekton-pipelines | - |
+### Source install
 
-## 🔧 Operations and Monitoring
+  If you have [go](https://golang.org/) installed and you want to compile the CLI from source, you can checkout the [Git repository](https://github.com/tektoncd/cli) and run the following commands:
 
-### Daily Monitoring Commands
+  ```shell
+  make bin/tkn
+  ```
+
+  This will output the `tkn` binary in `bin/tkn`
+
+### `tkn` as a `kubectl` plugin
+
+`kubectl` will find any binary named `kubectl-*` on your PATH and consider it as a plugin.
+After installing tkn, create a link as kubectl-tkn
+  ```shell
+ln -s /usr/local/bin/tkn /usr/local/bin/kubectl-tkn
+  ```
+For Mac OS X with Homebrew
+  ```shell
+ln -s $(brew --prefix)/opt/tektoncd-cli/bin/tkn /usr/local/bin/kubectl-tkn
+  ```
+Run the following to confirm tkn is available as a plugin:
+  ```shell
+kubectl plugin list
+  ```
+You should see the following after running kubectl plugin list if tkn is available as a plugin:
+  ```shell
+/usr/local/bin/kubectl-tkn
+```
+If the output above is shown, run kubectl-tkn to see the list of available tkn commands to run.
+
+## Useful Commands
+
+The following commands help you understand and effectively use the Tekton CLI:
+
+ * `tkn help:` Displays a list of the commands with helpful information.
+ * [`tkn bundle:`](docs/cmd/tkn_bundle.md) Manage Tekton [bundles](https://github.com/tektoncd/pipeline/blob/main/docs/tekton-bundle-contracts.md)
+ * [`tkn clustertriggerbinding:`](docs/cmd/tkn_clustertriggerbinding.md) Parent command of the ClusterTriggerBinding command group.
+ * [`tkn completion:`](docs/cmd/tkn_completion.md) Outputs a BASH, ZSH, Fish or PowerShell completion script for `tkn` to allow command completion with Tab.
+ * [`tkn customrun:`](docs/cmd/tkn_customrun.md) Parent command of the Customrun command group.
+ * [`tkn eventlistener:`](docs/cmd/tkn_eventlistener.md) Parent command of the Eventlistener command group.
+ * [`tkn hub:`](docs/cmd/tkn_hub.md) Search and install Tekton Resources from [Hub](https://hub.tekton.dev)
+ * [`tkn pipeline:`](docs/cmd/tkn_pipeline.md) Parent command of the Pipeline command group.
+ * [`tkn pipelinerun:`](docs/cmd/tkn_pipelinerun.md) Parent command of the Pipelinerun command group.
+ * [`tkn task:`](docs/cmd/tkn_task.md) Parent command of the Task command group.
+ * [`tkn taskrun:`](docs/cmd/tkn_taskrun.md) Parent command of the Taskrun command group.
+ * [`tkn triggerbinding:`](docs/cmd/tkn_triggerbinding.md) Parent command of the Triggerbinding command group.
+ * [`tkn triggertemplate:`](docs/cmd/tkn_triggertemplate.md) Parent command of the Triggertemplate command group.
+ * [`tkn version:`](docs/cmd/tkn_version.md) Outputs the cli version.
+
+For every `tkn` command, you can use `-h` or `--help` flags to display specific help for that command.
+
+## Disable Color and Emojis in Output
+
+For many `tkn` commands, color and emojis by default will appear in command
+output.
+
+It will only shows if you are in interactive shell with a [standard
+input](https://en.wikipedia.org/wiki/Standard_streams#Standard_input_(stdin))
+attached. If you pipe the tkn command or run it in a non interactive way (ie:
+from tekton itself in a Task) the coloring and emojis will *always* be disabled.
+
+`tkn` offers two approaches for disabling color and emojis from command output.
+
+To remove the color and emojis from all `tkn` command output, set the environment variable `NO_COLOR`, such as shown below:
+
+```shell
+export NO_COLOR=""
+```
+
+More information on `NO_COLOR` can be found in the [`NO_COLOR` documentation](https://no-color.org/).
+
+To remove color and emojis from the output of a single command execution, the `--no-color` option can be used with any command,
+such as in the example below:
 
 ```bash
-# Check all component status
-kubectl get pods -n tekton-pipelines
-
-# View Dashboard
-kubectl get ingress -n tekton-pipelines
-
-# Monitor Pipeline execution
-kubectl get pipelinerun -n tekton-pipelines --watch
-
-# View component logs
-kubectl logs -l app=tekton-dashboard -n tekton-pipelines -f
+tkn taskrun describe --no-color
 ```
 
-### Troubleshooting
 
-When encountering issues, troubleshoot in the following order:
+## Want to contribute
 
-1. **Run Verification Script**:
-   ```bash
-   ./scripts/en/utils/verify-installation.sh --stage=all
-   ```
+We are so excited to have you!
 
-2. **View Detailed Troubleshooting Guide**:
-   ```bash
-   cat docs/en/troubleshooting.md
-   ```
-
-3. **View Real-time Logs**:
-   ```bash
-   kubectl logs -l eventlistener=github-webhook-listener -n tekton-pipelines -f
-   ```
-
-## 🧹 Complete Cleanup
-
-To completely uninstall all components:
-
-```bash
-# Clean Stage 2 components
-./scripts/en/cleanup/02-cleanup-tekton-triggers.sh
-
-# Clean Stage 1 components  
-./scripts/en/cleanup/01-cleanup-tekton-core.sh
-
-# Verify cleanup completion
-kubectl get all -n tekton-pipelines
-kubectl get ns tekton-pipelines
-```
-
-## 📖 Detailed Documentation
-
-- **[Stage 1: Core Infrastructure Installation](./docs/en/01-tekton-core-installation.md)** - Pipeline + Dashboard installation
-- **[Stage 2: CI/CD Automation Configuration](./docs/en/02-tekton-triggers-setup.md)** - Triggers + GitHub Webhook
-- **[Troubleshooting Guide](./docs/en/troubleshooting.md)** - Common issues and solutions
-
-## 🌐 Language Support
-
-- **English**: [README.md](./README.md) | [Documentation](./docs/en/) | [Scripts](./scripts/en/)
-- **中文**: [README-zh.md](./README-zh.md) | [文档](./docs/zh/) | [脚本](./scripts/zh/)
-
-## 🤝 Support
-
-- 📧 **Issue Reports**: GitHub Issues
-- 📚 **Official Documentation**: [Tekton Documentation](https://tekton.dev/docs/)
-- 🔧 **Troubleshooting**: [Troubleshooting Guide](./docs/en/troubleshooting.md)
-
-## 📄 License
-
-This project is licensed under the MIT License.
-
----
-
-## ⚡ Important Notes
-
-- 🚨 **Production Environment**: This configuration is designed for production environments with security and performance optimizations
-- 🔄 **One-time Success**: Scripts include automatic fixes for all known issues
-- 📊 **Monitoring Integration**: Supports Prometheus/Grafana integration (optional configuration)
-- 🔐 **Security Hardening**: Follows Kubernetes security best practices
-
-**🎯 Start your production-grade Tekton deployment journey!** 
+- See [CONTRIBUTING.md](CONTRIBUTING.md) for an overview of our processes
+- See [DEVELOPMENT.md](DEVELOPMENT.md) for how to get started
+- See [ROADMAP.md](ROADMAP.md) for the current roadmap
+- See [releases.md][releases.md] for our release cadence and processes
+- Look at our
+  [good first issues](https://github.com/tektoncd/cli/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+  and our
+  [help wanted issues](https://github.com/tektoncd/cli/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)

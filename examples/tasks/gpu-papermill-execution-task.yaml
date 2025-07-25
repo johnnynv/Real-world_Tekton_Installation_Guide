@@ -1,0 +1,312 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gpu-papermill-execution
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-papermill-execution
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+    tekton.dev/gpu-required: "true"
+spec:
+  description: |
+    GPU-accelerated Papermill execution task for scientific computing notebooks.
+    Executes Jupyter notebooks using GPU resources with comprehensive logging.
+  params:
+  - name: notebook-path
+    description: Path to the input notebook file (relative to source root)
+    type: string
+    default: "notebooks/01_scRNA_analysis_preprocessing.ipynb"
+  - name: output-notebook-name
+    description: Name for the output executed notebook
+    type: string
+    default: "executed_notebook.ipynb"
+  - name: papermill-kernel
+    description: Kernel to use for papermill execution
+    type: string
+    default: "python3"
+  - name: container-image
+    description: GPU-enabled container image to use
+    type: string
+    default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  - name: gpu-count
+    description: Number of GPUs required
+    type: string
+    default: "1"
+  - name: memory-limit
+    description: Memory limit for the container
+    type: string
+    default: "32Gi"
+  - name: cpu-limit
+    description: CPU limit for the container
+    type: string
+    default: "8"
+  workspaces:
+  - name: shared-storage
+    description: Shared storage for source code and artifacts
+    mountPath: /workspace/shared
+  - name: gpu-cache
+    description: GPU computation cache workspace
+    mountPath: /workspace/gpu-cache
+  results:
+  - name: execution-status
+    description: Status of notebook execution
+  - name: output-notebook-path
+    description: Path to the executed notebook
+  - name: execution-time
+    description: Total execution time in seconds
+  steps:
+  - name: gpu-papermill-execute
+    image: $(params.container-image)
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility"
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: GPU_CACHE_PATH
+      value: $(workspaces.gpu-cache.path)
+    - name: NOTEBOOK_RELATIVED_DIR
+      value: "notebooks"
+    - name: NOTEBOOK_FILENAME
+      value: "01_scRNA_analysis_preprocessing.ipynb"
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: OUTPUT_NOTEBOOK
+      value: $(params.output-notebook-name)
+    resources:
+      limits:
+        nvidia.com/gpu: $(params.gpu-count)
+        memory: $(params.memory-limit)
+        cpu: $(params.cpu-limit)
+      requests:
+        nvidia.com/gpu: $(params.gpu-count)
+        memory: "16Gi"
+        cpu: "4"
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🚀 Starting GPU-accelerated Papermill execution..."
+      echo "🎯 Target notebook: $(params.notebook-path)"
+      echo "📁 Shared workspace: ${WORKSPACE_SHARED_PATH}"
+      echo "🚄 GPU cache: ${GPU_CACHE_PATH}"
+      echo "📊 GPU count: $(params.gpu-count)"
+      echo "🧠 Memory limit: $(params.memory-limit)"
+      echo "⚡ CPU limit: $(params.cpu-limit)"
+      
+      # Record start time
+      START_TIME=$(date +%s)
+      
+      # Ensure we're in the shared workspace
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Verify GPU availability
+      echo "🔍 Checking GPU availability..."
+      if command -v nvidia-smi &> /dev/null; then
+        echo "✅ nvidia-smi available:"
+        nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader,nounits
+      else
+        echo "⚠️  nvidia-smi not available, continuing without GPU verification"
+      fi
+      
+      # Verify notebook exists
+      if [ ! -f "$(params.notebook-path)" ]; then
+        echo "❌ Notebook not found: $(params.notebook-path)"
+        echo "📁 Available files in current directory:"
+        find . -name "*.ipynb" -type f | head -10
+        exit 1
+      fi
+      
+      # Create output directory
+      mkdir -p "${DOCKER_WRITEABLE_DIR}"
+      mkdir -p "${GPU_CACHE_PATH}/papermill"
+      
+      echo "✅ Notebook found: $(params.notebook-path)"
+      NOTEBOOK_SIZE=$(du -h "$(params.notebook-path)" | cut -f1)
+      echo "📊 Notebook size: ${NOTEBOOK_SIZE}"
+      
+      # Install additional dependencies if needed
+      echo "🔧 Installing additional Python dependencies..."
+      pip install --quiet --no-cache-dir papermill ipykernel jupyter || {
+        echo "⚠️  Some dependencies may already be installed, continuing..."
+      }
+      
+      # Install extra packages from docker-compose if available
+      if [ -n "${EXTRA_PIP_PACKAGES:-}" ]; then
+        echo "📦 Installing extra packages: ${EXTRA_PIP_PACKAGES}"
+        pip install --quiet --no-cache-dir ${EXTRA_PIP_PACKAGES} || {
+          echo "⚠️  Some extra packages failed to install, continuing..."
+        }
+      fi
+      
+      # Set up Python environment for GPU acceleration
+      export CUDA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-"all"}
+      export CUPY_CACHE_DIR="${GPU_CACHE_PATH}/cupy"
+      export NUMBA_CACHE_DIR="${GPU_CACHE_PATH}/numba"
+      mkdir -p "${CUPY_CACHE_DIR}" "${NUMBA_CACHE_DIR}"
+      
+      echo "🧪 Testing GPU availability in Python..."
+      python3 -c "
+import sys
+try:
+    import cupy as cp
+    print(f'✅ CuPy available, GPU count: {cp.cuda.runtime.getDeviceCount()}')
+    
+    # Test basic GPU operation
+    x = cp.array([1, 2, 3])
+    y = x * 2
+    print(f'✅ Basic GPU operation successful: {y}')
+except ImportError:
+    print('ℹ️  CuPy not available, will use CPU fallback')
+except Exception as e:
+    print(f'⚠️  GPU test failed: {e}, will continue with available resources')
+" || echo "ℹ️  GPU test completed with warnings"
+      
+      # Execute notebook with papermill
+      echo "🔥 Executing notebook with Papermill..."
+      echo "📝 Command: papermill \"${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}\" \"${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}\""
+      
+      # Execute with comprehensive logging
+      papermill "${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}" "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}" \
+        --log-output \
+        --log-level DEBUG \
+        --progress-bar \
+        --report-mode \
+        --kernel $(params.papermill-kernel) \
+        --cwd "${WORKSPACE_SHARED_PATH}" \
+        2>&1 | tee "${DOCKER_WRITEABLE_DIR}/papermill.log"
+      
+      PAPERMILL_EXIT_CODE=${PIPESTATUS[0]}
+      
+      # Record end time and calculate duration
+      END_TIME=$(date +%s)
+      EXECUTION_TIME=$((END_TIME - START_TIME))
+      echo "⏱️  Total execution time: ${EXECUTION_TIME} seconds"
+      echo -n "${EXECUTION_TIME}" > "$(results.execution-time.path)"
+      
+      # Check execution results
+      if [ $PAPERMILL_EXIT_CODE -eq 0 ]; then
+        echo "✅ Papermill execution completed successfully"
+        echo -n "success" > "$(results.execution-status.path)"
+        
+        # Verify output notebook was created
+        if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}" ]; then
+          echo "✅ Output notebook created successfully"
+          OUTPUT_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}" | cut -f1)
+          echo "📊 Output notebook size: ${OUTPUT_SIZE}"
+          echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}" > "$(results.output-notebook-path.path)"
+        else
+          echo "❌ Output notebook not found after execution"
+          echo -n "error" > "$(results.execution-status.path)"
+          exit 1
+        fi
+      else
+        echo "❌ Papermill execution failed with exit code: $PAPERMILL_EXIT_CODE"
+        echo -n "failed" > "$(results.execution-status.path)"
+        
+        # Show last few lines of log for debugging
+        echo "🔍 Last 20 lines of papermill log:"
+        tail -20 "${DOCKER_WRITEABLE_DIR}/papermill.log" || echo "No log file available"
+        exit 1
+      fi
+      
+      # Optional: Clean up cache if requested
+      if [ "${CLEANUP_CACHE:-false}" = "true" ]; then
+        echo "🧹 Cleaning up GPU cache..."
+        rm -rf "${GPU_CACHE_PATH}/cupy" "${GPU_CACHE_PATH}/numba"
+      fi
+      
+      # Final GPU memory check
+      if command -v nvidia-smi &> /dev/null; then
+        echo "📊 Final GPU memory usage:"
+        nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
+      fi
+      
+      echo "🎉 GPU Papermill execution task completed successfully!"
+      
+  - name: validate-output
+    image: python:3.12-slim
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: OUTPUT_NOTEBOOK
+      value: $(params.output-notebook-name)
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🔍 Validating Papermill execution output..."
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Check if output notebook exists and is valid JSON
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}" ]; then
+        echo "✅ Output notebook file exists"
+        
+        # Validate JSON structure
+        python3 -c "
+import json
+import sys
+
+try:
+    with open('${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}', 'r') as f:
+        notebook = json.load(f)
+    
+    cell_count = len(notebook.get('cells', []))
+    print(f'✅ Valid notebook JSON with {cell_count} cells')
+    
+    # Check for execution metadata
+    executed_cells = 0
+    for cell in notebook.get('cells', []):
+        if cell.get('cell_type') == 'code' and 'execution_count' in cell:
+            if cell['execution_count'] is not None:
+                executed_cells += 1
+    
+    print(f'📊 Executed code cells: {executed_cells}')
+    
+    if executed_cells > 0:
+        print('✅ Notebook appears to have been executed successfully')
+    else:
+        print('⚠️  No executed cells found, notebook may not have run properly')
+        
+except json.JSONDecodeError as e:
+    print(f'❌ Invalid JSON in output notebook: {e}')
+    sys.exit(1)
+except Exception as e:
+    print(f'❌ Error validating notebook: {e}')
+    sys.exit(1)
+"
+        
+        # Check for papermill execution metadata
+        if grep -q "papermill" "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}"; then
+          echo "✅ Papermill execution metadata found"
+        else
+          echo "⚠️  No papermill metadata found in output"
+        fi
+        
+      else
+        echo "❌ Output notebook file not found: ${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}"
+        exit 1
+      fi
+      
+      # Check log file
+      if [ -f "${DOCKER_WRITEABLE_DIR}/papermill.log" ]; then
+        echo "✅ Papermill log file exists"
+        LOG_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/papermill.log" | cut -f1)
+        echo "📊 Log file size: ${LOG_SIZE}"
+        
+        # Check for errors in log
+        if grep -i "error\|exception\|failed" "${DOCKER_WRITEABLE_DIR}/papermill.log" | grep -v "warnings.warn" > /dev/null; then
+          echo "⚠️  Potential errors found in log (please review):"
+          grep -i "error\|exception\|failed" "${DOCKER_WRITEABLE_DIR}/papermill.log" | grep -v "warnings.warn" | tail -5
+        else
+          echo "✅ No critical errors found in log"
+        fi
+      else
+        echo "⚠️  Papermill log file not found"
+      fi
+      
+      echo "✅ Output validation completed" 

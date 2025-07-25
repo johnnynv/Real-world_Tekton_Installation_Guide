@@ -1,0 +1,45 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: github-trigger-template
+  namespace: tekton-pipelines
+spec:
+  params:
+  - name: git-repo-url
+    description: Git repository URL
+  - name: git-revision
+    description: Git revision
+  - name: git-repo-name
+    description: Git repository name
+  - name: git-branch
+    description: Git branch reference
+    default: "refs/heads/main"
+  - name: git-author
+    description: Git commit author
+    default: "unknown"
+  - name: git-message
+    description: Git commit message
+    default: "No message"
+  resourcetemplates:
+  - apiVersion: tekton.dev/v1
+    kind: PipelineRun
+    metadata:
+      generateName: webhook-pipeline-run-
+      namespace: tekton-pipelines
+      labels:
+        app: tekton-webhook
+        trigger: github-push
+        repo: $(tt.params.git-repo-name)
+      annotations:
+        tekton.dev/git-commit: $(tt.params.git-revision)
+        tekton.dev/git-branch: $(tt.params.git-branch)
+    spec:
+      pipelineRef:
+        name: hello-world-pipeline
+      params:
+      - name: repo-url
+        value: $(tt.params.git-repo-url)
+      - name: revision
+        value: $(tt.params.git-revision)
+      - name: repo-name
+        value: $(tt.params.git-repo-name) 

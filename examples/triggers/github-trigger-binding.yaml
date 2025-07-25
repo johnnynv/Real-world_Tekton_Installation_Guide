@@ -1,0 +1,19 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-trigger-binding
+  namespace: tekton-pipelines
+spec:
+  params:
+  - name: git-repo-url
+    value: $(body.repository.clone_url)
+  - name: git-revision
+    value: $(body.head_commit.id)
+  - name: git-repo-name
+    value: $(body.repository.name)
+  - name: git-branch
+    value: $(body.ref)
+  - name: git-author
+    value: $(body.head_commit.author.name)
+  - name: git-message
+    value: $(body.head_commit.message) 

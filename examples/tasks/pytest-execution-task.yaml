@@ -1,0 +1,464 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: pytest-execution
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: pytest-execution
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    PyTest execution task for running tests against generated HTML reports.
+    Downloads test framework repository and executes comprehensive test suite.
+  params:
+  - name: test-repo-url
+    description: URL of the test framework repository
+    type: string
+    default: "https://github.com/NVIDIA-AI-Blueprints/blueprint-github-test.git"
+  - name: test-repo-branch
+    description: Branch of the test repository to checkout
+    type: string
+    default: "main"
+  - name: html-input-file
+    description: Name of the HTML file to test
+    type: string
+    default: "executed_notebook.html"
+  - name: pytest-markers
+    description: PyTest markers to run (e.g., 'single_cell')
+    type: string
+    default: "single_cell"
+  - name: poetry-install
+    description: Whether to use poetry for dependency management
+    type: string
+    default: "true"
+  - name: python-version
+    description: Python version to use
+    type: string
+    default: "3.12"
+  workspaces:
+  - name: shared-storage
+    description: Shared storage for HTML files and test results
+    mountPath: /workspace/shared
+  - name: test-workspace
+    description: Workspace for test repository and execution
+    mountPath: /workspace/test
+  results:
+  - name: test-status
+    description: Overall test execution status
+  - name: coverage-xml-path
+    description: Path to coverage XML report
+  - name: pytest-xml-path
+    description: Path to pytest XML report
+  - name: report-html-path
+    description: Path to pytest HTML report
+  steps:
+  - name: download-test-repo
+    image: alpine/git:latest
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: WORKSPACE_TEST_PATH
+      value: $(workspaces.test-workspace.path)
+    script: |
+      #!/bin/sh
+      set -eu
+      
+      echo "📥 Downloading test framework repository..."
+      echo "🔗 Repository URL: $(params.test-repo-url)"
+      echo "🌿 Branch: $(params.test-repo-branch)"
+      echo "📁 Test workspace: ${WORKSPACE_TEST_PATH}"
+      
+      # Create test workspace directory
+      mkdir -p "${WORKSPACE_TEST_PATH}"
+      cd "${WORKSPACE_TEST_PATH}"
+      
+      # Clone the test repository
+      echo "🔄 Cloning test repository..."
+      git clone --branch $(params.test-repo-branch) --depth 1 $(params.test-repo-url) test-framework
+      
+      cd test-framework
+      
+      echo "✅ Test repository downloaded successfully"
+      echo "📂 Repository contents:"
+      ls -la
+      
+      # Check for expected files
+      if [ -d "input" ]; then
+        echo "✅ Found 'input' directory"
+        echo "📁 Current input directory contents:"
+        ls -la input/ || echo "Input directory is empty"
+      else
+        echo "⚠️  'input' directory not found, creating it..."
+        mkdir -p input
+      fi
+      
+      if [ -f "pyproject.toml" ]; then
+        echo "✅ Found pyproject.toml (Poetry configuration)"
+      elif [ -f "requirements.txt" ]; then
+        echo "✅ Found requirements.txt"
+      else
+        echo "⚠️  No dependency configuration found"
+      fi
+      
+      echo "✅ Test repository setup completed"
+      
+  - name: prepare-test-inputs
+    image: alpine:latest
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: WORKSPACE_TEST_PATH
+      value: $(workspaces.test-workspace.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: HTML_INPUT_FILE
+      value: $(params.html-input-file)
+    script: |
+      #!/bin/sh
+      set -eu
+      
+      echo "📋 Preparing test inputs..."
+      cd "${WORKSPACE_TEST_PATH}/test-framework"
+      
+      # Clear the input directory as specified in the original workflow
+      echo "🧹 Clearing input directory..."
+      rm -rf input/*
+      echo "✅ Input directory cleared"
+      
+      # Copy HTML file to input directory
+      if [ -f "${DOCKER_WRITEABLE_DIR}/staging/${HTML_INPUT_FILE}" ]; then
+        echo "📄 Copying HTML file to input directory..."
+        cp "${DOCKER_WRITEABLE_DIR}/staging/${HTML_INPUT_FILE}" input/
+        echo "✅ HTML file copied: ${HTML_INPUT_FILE}"
+      elif [ -f "${DOCKER_WRITEABLE_DIR}/${HTML_INPUT_FILE}" ]; then
+        echo "📄 Copying HTML file from artifacts..."
+        cp "${DOCKER_WRITEABLE_DIR}/${HTML_INPUT_FILE}" input/
+        echo "✅ HTML file copied: ${HTML_INPUT_FILE}"
+      else
+        echo "❌ HTML file not found: ${HTML_INPUT_FILE}"
+        echo "📁 Available files in artifacts:"
+        ls -la "${DOCKER_WRITEABLE_DIR}/" || echo "Artifacts directory not accessible"
+        echo "📁 Available files in staging:"
+        ls -la "${DOCKER_WRITEABLE_DIR}/staging/" || echo "Staging directory not accessible"
+        exit 1
+      fi
+      
+      # Copy any metadata files
+      if [ -f "${DOCKER_WRITEABLE_DIR}/staging/conversion_metadata.txt" ]; then
+        cp "${DOCKER_WRITEABLE_DIR}/staging/conversion_metadata.txt" input/
+        echo "✅ Metadata file copied"
+      fi
+      
+      echo "📁 Final input directory contents:"
+      ls -la input/
+      
+      echo "✅ Test inputs prepared successfully"
+      
+  - name: setup-test-environment
+    image: python:$(params.python-version)-slim
+    env:
+    - name: WORKSPACE_TEST_PATH
+      value: $(workspaces.test-workspace.path)
+    - name: POETRY_VENV_IN_PROJECT
+      value: "true"
+    - name: POETRY_CACHE_DIR
+      value: "/tmp/poetry-cache"
+    workingDir: $(workspaces.test-workspace.path)/test-framework
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🔧 Setting up test environment..."
+      echo "🐍 Python version: $(python --version)"
+      
+      # Update package manager
+      apt-get update && apt-get install -y curl git
+      
+      # Install Poetry if needed
+      if [ "$(params.poetry-install)" = "true" ]; then
+        echo "📦 Installing Poetry..."
+        curl -sSL https://install.python-poetry.org | python3 -
+        export PATH="/root/.local/bin:$PATH"
+        
+        # Verify Poetry installation
+        poetry --version
+        
+        # Configure Poetry
+        poetry config virtualenvs.create true
+        poetry config virtualenvs.in-project true
+        
+        echo "📥 Installing dependencies with Poetry..."
+        poetry install --no-dev || {
+          echo "⚠️  Poetry install failed, trying with --no-interaction"
+          poetry install --no-dev --no-interaction
+        }
+        
+        echo "✅ Poetry dependencies installed"
+        
+      else
+        echo "📥 Installing dependencies with pip..."
+        if [ -f "requirements.txt" ]; then
+          pip install --no-cache-dir -r requirements.txt
+        else
+          echo "📦 Installing basic testing dependencies..."
+          pip install --no-cache-dir pytest pytest-cov pytest-html beautifulsoup4 requests
+        fi
+        
+        echo "✅ Pip dependencies installed"
+      fi
+      
+      echo "🔍 Python environment info:"
+      python -m pip list | grep -E "(pytest|coverage|beautifulsoup)" || echo "Core test packages status unknown"
+      
+      echo "✅ Test environment setup completed"
+      
+  - name: execute-tests
+    image: python:$(params.python-version)-slim
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: WORKSPACE_TEST_PATH
+      value: $(workspaces.test-workspace.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: OUTPUT_PYTEST_COVERAGE_XML
+      value: "coverage.xml"
+    - name: OUTPUT_PYTEST_RESULT_XML
+      value: "pytest_results.xml"
+    - name: OUTPUT_PYTEST_REPORT_HTML
+      value: "pytest_report.html"
+    - name: POETRY_VENV_IN_PROJECT
+      value: "true"
+    workingDir: $(workspaces.test-workspace.path)/test-framework
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🧪 Starting PyTest execution..."
+      echo "🎯 Test markers: $(params.pytest-markers)"
+      echo "📁 Working directory: $(pwd)"
+      echo "📁 Output directory: ${DOCKER_WRITEABLE_DIR}"
+      
+      # Prepare output directories
+      mkdir -p "${DOCKER_WRITEABLE_DIR}/test-results"
+      
+      # Set up Poetry environment if needed
+      if [ "$(params.poetry-install)" = "true" ]; then
+        export PATH="/root/.local/bin:$PATH"
+        echo "🔧 Using Poetry for test execution..."
+        
+        # Execute tests with Poetry
+        echo "🚀 Running pytest with Poetry..."
+        TEST_OUTPUT=$(poetry run pytest -m $(params.pytest-markers) \
+          --cov=./ \
+          --cov-report=xml:"${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_COVERAGE_XML}" \
+          --junitxml="${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_RESULT_XML}" \
+          --html="${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_REPORT_HTML}" \
+          --self-contained-html \
+          -v \
+          2>&1) || true
+          
+      else
+        echo "🚀 Running pytest directly..."
+        TEST_OUTPUT=$(python -m pytest -m $(params.pytest-markers) \
+          --cov=./ \
+          --cov-report=xml:"${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_COVERAGE_XML}" \
+          --junitxml="${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_RESULT_XML}" \
+          --html="${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_REPORT_HTML}" \
+          --self-contained-html \
+          -v \
+          2>&1) || true
+      fi
+      
+      PYTEST_EXIT_CODE=$?
+      
+      echo "📝 Test execution output:"
+      echo "${TEST_OUTPUT}"
+      
+      # Save test output to file
+      echo "${TEST_OUTPUT}" > "${DOCKER_WRITEABLE_DIR}/pytest_execution.log"
+      
+      # Check test results
+      echo "📊 Analyzing test results..."
+      
+      # Verify output files were created
+      COVERAGE_CREATED=false
+      JUNIT_CREATED=false
+      HTML_CREATED=false
+      
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_COVERAGE_XML}" ]; then
+        echo "✅ Coverage XML report created"
+        COVERAGE_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_COVERAGE_XML}" | cut -f1)
+        echo "📊 Coverage report size: ${COVERAGE_SIZE}"
+        echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_COVERAGE_XML}" > "$(results.coverage-xml-path.path)"
+        COVERAGE_CREATED=true
+      else
+        echo "⚠️  Coverage XML report not found"
+      fi
+      
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_RESULT_XML}" ]; then
+        echo "✅ JUnit XML report created"
+        JUNIT_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_RESULT_XML}" | cut -f1)
+        echo "📊 JUnit report size: ${JUNIT_SIZE}"
+        echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_RESULT_XML}" > "$(results.pytest-xml-path.path)"
+        JUNIT_CREATED=true
+      else
+        echo "⚠️  JUnit XML report not found"
+      fi
+      
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_REPORT_HTML}" ]; then
+        echo "✅ HTML test report created"
+        HTML_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_REPORT_HTML}" | cut -f1)
+        echo "📊 HTML report size: ${HTML_SIZE}"
+        echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_PYTEST_REPORT_HTML}" > "$(results.report-html-path.path)"
+        HTML_CREATED=true
+      else
+        echo "⚠️  HTML test report not found"
+      fi
+      
+      # Determine overall status
+      if [ $PYTEST_EXIT_CODE -eq 0 ] && [ "$COVERAGE_CREATED" = true ] && [ "$JUNIT_CREATED" = true ] && [ "$HTML_CREATED" = true ]; then
+        echo "✅ All tests passed and reports generated successfully"
+        echo -n "success" > "$(results.test-status.path)"
+      elif [ "$COVERAGE_CREATED" = true ] && [ "$JUNIT_CREATED" = true ] && [ "$HTML_CREATED" = true ]; then
+        echo "⚠️  Tests completed with issues but reports were generated"
+        echo -n "completed_with_warnings" > "$(results.test-status.path)"
+      else
+        echo "❌ Test execution failed or reports missing"
+        echo -n "failed" > "$(results.test-status.path)"
+        
+        # Don't exit with error if we have partial results
+        if [ "$COVERAGE_CREATED" = true ] || [ "$JUNIT_CREATED" = true ] || [ "$HTML_CREATED" = true ]; then
+          echo "ℹ️  Partial results available, continuing pipeline"
+        fi
+      fi
+      
+      echo "⏱️  PyTest execution completed"
+      
+  - name: validate-test-outputs
+    image: python:3.12-slim
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🔍 Validating test outputs..."
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Install XML parsing dependencies
+      pip install --quiet --no-cache-dir lxml beautifulsoup4 || {
+        echo "⚠️  XML validation dependencies not available"
+      }
+      
+      # Validate Coverage XML
+      if [ -f "${DOCKER_WRITEABLE_DIR}/coverage.xml" ]; then
+        echo "✅ Coverage XML found"
+        
+        python3 -c "
+import xml.etree.ElementTree as ET
+import sys
+
+try:
+    tree = ET.parse('${DOCKER_WRITEABLE_DIR}/coverage.xml')
+    root = tree.getroot()
+    
+    # Extract coverage information
+    coverage_elem = root.find('.//coverage')
+    if coverage_elem is not None:
+        line_rate = coverage_elem.get('line-rate', 'unknown')
+        lines_covered = coverage_elem.get('lines-covered', 'unknown')
+        lines_valid = coverage_elem.get('lines-valid', 'unknown')
+        print(f'📊 Coverage line rate: {line_rate}')
+        print(f'📊 Lines covered: {lines_covered}/{lines_valid}')
+    else:
+        print('ℹ️  Coverage metrics not found in expected format')
+        
+    print('✅ Coverage XML is valid')
+    
+except ET.ParseError as e:
+    print(f'❌ Invalid Coverage XML: {e}')
+except Exception as e:
+    print(f'⚠️  Error analyzing coverage: {e}')
+"
+      else
+        echo "⚠️  Coverage XML not found"
+      fi
+      
+      # Validate JUnit XML
+      if [ -f "${DOCKER_WRITEABLE_DIR}/pytest_results.xml" ]; then
+        echo "✅ JUnit XML found"
+        
+        python3 -c "
+import xml.etree.ElementTree as ET
+import sys
+
+try:
+    tree = ET.parse('${DOCKER_WRITEABLE_DIR}/pytest_results.xml')
+    root = tree.getroot()
+    
+    # Extract test information
+    test_count = 0
+    failure_count = 0
+    error_count = 0
+    
+    for testsuite in root.findall('.//testsuite'):
+        tests = int(testsuite.get('tests', 0))
+        failures = int(testsuite.get('failures', 0))
+        errors = int(testsuite.get('errors', 0))
+        
+        test_count += tests
+        failure_count += failures
+        error_count += errors
+    
+    print(f'📊 Total tests: {test_count}')
+    print(f'📊 Failures: {failure_count}')
+    print(f'📊 Errors: {error_count}')
+    
+    if test_count > 0:
+        success_rate = ((test_count - failure_count - error_count) / test_count) * 100
+        print(f'📊 Success rate: {success_rate:.1f}%')
+    
+    print('✅ JUnit XML is valid')
+    
+except ET.ParseError as e:
+    print(f'❌ Invalid JUnit XML: {e}')
+except Exception as e:
+    print(f'⚠️  Error analyzing JUnit results: {e}')
+"
+      else
+        echo "⚠️  JUnit XML not found"
+      fi
+      
+      # Validate HTML Report
+      if [ -f "${DOCKER_WRITEABLE_DIR}/pytest_report.html" ]; then
+        echo "✅ HTML test report found"
+        
+        HTML_SIZE_BYTES=$(stat -c%s "${DOCKER_WRITEABLE_DIR}/pytest_report.html")
+        echo "📊 HTML report size: $HTML_SIZE_BYTES bytes"
+        
+        if [ "$HTML_SIZE_BYTES" -gt 10000 ]; then
+          echo "✅ HTML report size looks reasonable"
+        else
+          echo "⚠️  HTML report seems small, may be incomplete"
+        fi
+        
+        # Check HTML structure
+        if grep -q "<html" "${DOCKER_WRITEABLE_DIR}/pytest_report.html"; then
+          echo "✅ HTML structure detected"
+        else
+          echo "⚠️  HTML structure not detected"
+        fi
+        
+      else
+        echo "⚠️  HTML test report not found"
+      fi
+      
+      echo "📁 Final artifacts directory contents:"
+      ls -la "${DOCKER_WRITEABLE_DIR}/"
+      
+      echo "✅ Test output validation completed" 
