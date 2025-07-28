@@ -1,172 +1,82 @@
-# Stage 2: Tekton CI/CD Automation Configuration Guide
+# Tekton Triggers Installation and Configuration Guide
 
-This guide provides detailed instructions for configuring Tekton Triggers on top of existing Tekton core infrastructure, enabling complete CI/CD automation with GitHub webhook-triggered Pipeline execution.
+This guide describes how to install and configure Tekton Triggers for event-driven Pipeline automation.
 
-## 📋 Stage 2 Objectives
+## 📋 Configuration Goals
 
-- ✅ Install Tekton Triggers (event-driven system)
-- ✅ Configure GitHub Webhook integration
-- ✅ Create EventListener (event listener)
-- ✅ Configure TriggerBinding and TriggerTemplate
-- ✅ Setup RBAC permissions and security configuration
-- ✅ Verify automated Pipeline triggering
-
-## 🏗️ Architecture Overview
-
-```
-┌─────────────────────────────────────────────────┐
-│                GitHub Repository                 │
-│         https://github.com/user/repo           │
-└─────────────────┬───────────────────────────────┘
-                  │ push event
-                  ▼
-┌─────────────────────────────────────────────────┐
-│              GitHub Webhook                     │
-│    http://tekton.YOUR_NODE_IP.nip.io/webhook   │
-└─────────────────┬───────────────────────────────┘
-                  │ HTTP POST
-                  ▼
-┌─────────────────────────────────────────────────┐
-│            Nginx Ingress Controller             │
-│              (Routing and Load Balancing)       │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│             EventListener                      │
-│          (Receive and parse webhook events)    │
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│        TriggerBinding + TriggerTemplate         │
-│        (Extract parameters + Create PipelineRun)│
-└─────────────────┬───────────────────────────────┘
-                  │
-                  ▼
-┌─────────────────────────────────────────────────┐
-│              PipelineRun                       │
-│           (Automated CI/CD Pipeline Execution) │
-└─────────────────────────────────────────────────┘
-```
+- ✅ Install Tekton Triggers
+- ✅ Configure RBAC permissions
+- ✅ Create EventListener service
+- ✅ Verify Triggers functionality
 
 ## 🔧 Prerequisites
 
-### Requirements
+- ✅ Completed [Tekton Core Installation](01-tekton-installation.md)
+- ✅ Tekton Pipelines running normally
+- ✅ kubectl access permissions
 
-- ✅ **Stage 1 Completed**: Tekton Pipelines + Dashboard installed and running normally
-- ✅ **Dashboard Accessible**: `http://tekton.YOUR_NODE_IP.nip.io/` working properly
-- ✅ **GitHub Repository**: GitHub repository with admin permissions
-- ✅ **Network Access**: GitHub can access your webhook endpoint
+## 🚀 Step 1: Install Tekton Triggers
 
-### Verify Prerequisites
-
+### Install Triggers Components
 ```bash
-# Check Stage 1 installation status
-kubectl get pods -n tekton-pipelines
-kubectl get ingress -n tekton-pipelines
-
-# Verify Dashboard access
-curl -s http://tekton.YOUR_NODE_IP.nip.io/ | grep -q "Tekton" && echo "Dashboard OK" || echo "Dashboard Error"
-
-# Check existing Pipeline functionality
-kubectl get pipeline,task -n tekton-pipelines
-```
-
-### Environment Configuration
-
-```bash
-# Set environment variables
-export TEKTON_NAMESPACE="tekton-pipelines"
-export NODE_IP="YOUR_NODE_IP"
-export TEKTON_DOMAIN="tekton.${NODE_IP}.nip.io"
-export WEBHOOK_URL="http://${TEKTON_DOMAIN}/webhook"
-export GITHUB_REPO_URL="https://github.com/YOUR_USERNAME/YOUR_REPO"
-export GITHUB_SECRET="110120119"
-
-# Verify environment
-echo "Webhook URL: ${WEBHOOK_URL}"
-echo "GitHub Repository: ${GITHUB_REPO_URL}"
-```
-
-## 🚀 Installation Steps
-
-### Step 1: Install Tekton Triggers
-
-#### 1.1 Install Triggers Components
-
-```bash
-# Install Tekton Triggers
+# Install latest Tekton Triggers version
 kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/release.yaml
 
-# Wait for Triggers components to start
-kubectl wait --for=condition=ready pod \
-  --selector=app.kubernetes.io/name=tekton-triggers-controller \
-  --namespace=${TEKTON_NAMESPACE} \
-  --timeout=300s
+# Install Interceptors (event interceptors)
+kubectl apply --filename https://storage.googleapis.com/tekton-releases/triggers/latest/interceptors.yaml
 
-kubectl wait --for=condition=ready pod \
-  --selector=app.kubernetes.io/name=tekton-triggers-webhook \
-  --namespace=${TEKTON_NAMESPACE} \
-  --timeout=300s
-
-kubectl wait --for=condition=ready pod \
-  --selector=app.kubernetes.io/name=tekton-triggers-core-interceptors \
-  --namespace=${TEKTON_NAMESPACE} \
-  --timeout=300s
+# Wait for all Pods to be running
+kubectl wait --for=condition=Ready pod --all -n tekton-pipelines --timeout=300s
 ```
 
-#### 1.2 Verify Triggers Installation
-
+### Verify Triggers Installation
 ```bash
-# Check Triggers components
-kubectl get pods -n ${TEKTON_NAMESPACE} | grep triggers
+# Check Triggers Pod status
+kubectl get pods -n tekton-pipelines | grep triggers
 
-# Verify Triggers CRDs
+# Check Triggers CRDs
 kubectl get crd | grep triggers.tekton.dev
-
-# Check ClusterInterceptors
-kubectl get clusterinterceptor
 ```
 
-### Step 2: Configure RBAC Permissions
+Expected output:
+```
+tekton-triggers-controller-xxx    Running
+tekton-triggers-webhook-xxx       Running
+tekton-triggers-core-interceptors-xxx    Running
+```
 
-#### 2.1 Create ServiceAccount
+## 🔐 Step 2: Configure RBAC Permissions
 
+### Create Service Account and Permissions
 ```bash
-# Create ServiceAccount for Triggers
-kubectl apply -f - <<EOF
+# Create basic RBAC configuration
+cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: tekton-triggers-sa
-  namespace: ${TEKTON_NAMESPACE}
-EOF
-```
-
-#### 2.2 Create ClusterRole and ClusterRoleBinding
-
-```bash
-# Create ClusterRole with necessary permissions
-kubectl apply -f - <<EOF
+  namespace: tekton-pipelines
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: tekton-triggers-role
 rules:
-- apiGroups: [""]
-  resources: ["configmaps", "secrets", "events"]
-  verbs: ["get", "list", "create", "update", "delete"]
+# Tekton Pipelines permissions
 - apiGroups: ["tekton.dev"]
-  resources: ["tasks", "taskruns", "pipelines", "pipelineruns"]
-  verbs: ["get", "list", "create", "update", "delete", "patch", "watch"]
+  resources: ["pipelines", "pipelineruns", "tasks", "taskruns"]
+  verbs: ["get", "list", "create", "update", "patch", "watch"]
+
+# Tekton Triggers permissions
 - apiGroups: ["triggers.tekton.dev"]
   resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers"]
-  verbs: ["get", "list", "create", "update", "delete", "patch", "watch"]
-EOF
+  verbs: ["get", "list", "create", "update", "patch", "watch"]
 
-# Create ClusterRoleBinding
-kubectl apply -f - <<EOF
+# Core Kubernetes resources
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"]
+  verbs: ["get", "list", "create", "update", "patch", "watch", "delete"]
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -174,489 +84,233 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: tekton-triggers-sa
-  namespace: ${TEKTON_NAMESPACE}
+  namespace: tekton-pipelines
 roleRef:
-  apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: tekton-triggers-role
-EOF
-```
-
-### Step 3: Create GitHub Webhook Secret
-
-```bash
-# Create Secret for GitHub webhook authentication
-kubectl apply -f - <<EOF
-apiVersion: v1
-kind: Secret
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
 metadata:
-  name: github-webhook-secret
-  namespace: ${TEKTON_NAMESPACE}
-type: Opaque
-stringData:
-  secretToken: "${GITHUB_SECRET}"
-EOF
-```
-
-### Step 4: Create Pipeline Resources
-
-#### 4.1 Create Sample Task
-
-```bash
-# Create a sample Task for webhook testing
-kubectl apply -f - <<EOF
-apiVersion: tekton.dev/v1
-kind: Task
+  name: tekton-triggers-namespace-role
+  namespace: tekton-pipelines
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
 metadata:
-  name: github-webhook-task
-  namespace: ${TEKTON_NAMESPACE}
-spec:
-  params:
-  - name: repo-url
-    type: string
-    default: "unknown"
-  - name: revision
-    type: string
-    default: "main"
-  - name: commit-message
-    type: string
-    default: "no message"
-  - name: author
-    type: string
-    default: "unknown"
-  steps:
-  - name: log-webhook-info
-    image: alpine:latest
-    script: |
-      #!/bin/sh
-      echo "🎉 GitHub Webhook triggered successfully!"
-      echo "Repository: \$(params.repo-url)"
-      echo "Revision: \$(params.revision)"
-      echo "Commit Message: \$(params.commit-message)"
-      echo "Author: \$(params.author)"
-      echo "Trigger Time: \$(date)"
-      echo "Node: \$(hostname)"
-      echo "================================"
-      echo "✅ Tekton Triggers working properly"
+  name: tekton-triggers-namespace-binding
+  namespace: tekton-pipelines
+subjects:
+- kind: ServiceAccount
+  name: tekton-triggers-sa
+  namespace: tekton-pipelines
+roleRef:
+  kind: Role
+  name: tekton-triggers-namespace-role
+  apiGroup: rbac.authorization.k8s.io
 EOF
 ```
 
-#### 4.2 Create Sample Pipeline
+## 📝 Step 3: Create Basic Trigger Components
 
+### Create Example TriggerTemplate
 ```bash
-# Create Pipeline for GitHub webhook
-kubectl apply -f - <<EOF
-apiVersion: tekton.dev/v1
-kind: Pipeline
-metadata:
-  name: github-webhook-pipeline
-  namespace: ${TEKTON_NAMESPACE}
-spec:
-  params:
-  - name: repo-url
-    type: string
-  - name: revision
-    type: string
-  - name: commit-message
-    type: string
-    default: "no message"
-  - name: author
-    type: string
-    default: "unknown"
-  tasks:
-  - name: webhook-handler
-    taskRef:
-      name: github-webhook-task
-    params:
-    - name: repo-url
-      value: \$(params.repo-url)
-    - name: revision
-      value: \$(params.revision)
-    - name: commit-message
-      value: \$(params.commit-message)
-    - name: author
-      value: \$(params.author)
-EOF
-```
-
-### Step 5: Configure Trigger Components
-
-#### 5.1 Create TriggerBinding
-
-```bash
-# Create TriggerBinding to extract GitHub webhook data
-kubectl apply -f - <<EOF
-apiVersion: triggers.tekton.dev/v1beta1
-kind: TriggerBinding
-metadata:
-  name: github-trigger-binding
-  namespace: ${TEKTON_NAMESPACE}
-spec:
-  params:
-  - name: git-repo-url
-    value: \$(body.repository.clone_url)
-  - name: git-repo-name
-    value: \$(body.repository.name)
-  - name: git-revision
-    value: \$(body.head_commit.id)
-  - name: git-commit-message
-    value: \$(body.head_commit.message)
-  - name: git-author
-    value: \$(body.head_commit.author.name)
-EOF
-```
-
-#### 5.2 Create TriggerTemplate
-
-```bash
-# Create TriggerTemplate to generate PipelineRun
-kubectl apply -f - <<EOF
+cat <<EOF | kubectl apply -f -
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerTemplate
 metadata:
-  name: github-trigger-template
-  namespace: ${TEKTON_NAMESPACE}
+  name: hello-world-template
+  namespace: tekton-pipelines
 spec:
   params:
   - name: git-repo-url
+    description: Git repository URL
   - name: git-revision
-  - name: git-repo-name
-  - name: git-commit-message
-    default: "no message"
-  - name: git-author
-    default: "unknown"
+    description: Git revision
+    default: main
   resourcetemplates:
   - apiVersion: tekton.dev/v1
-    kind: PipelineRun
+    kind: TaskRun
     metadata:
-      generateName: github-webhook-run-
-      namespace: ${TEKTON_NAMESPACE}
-      labels:
-        app: tekton-triggers
-        trigger: github-webhook
-        repo: \$(tt.params.git-repo-name)
+      generateName: hello-world-run-
     spec:
-      pipelineRef:
-        name: github-webhook-pipeline
+      taskSpec:
+        params:
+        - name: repo-url
+          type: string
+        - name: revision
+          type: string
+        steps:
+        - name: hello
+          image: ubuntu
+          script: |
+            #!/bin/bash
+            echo "Triggered by event!"
+            echo "Repository: \$(params.repo-url)"
+            echo "Revision: \$(params.revision)"
       params:
       - name: repo-url
         value: \$(tt.params.git-repo-url)
       - name: revision
         value: \$(tt.params.git-revision)
-      - name: commit-message
-        value: \$(tt.params.git-commit-message)
-      - name: author
-        value: \$(tt.params.git-author)
 EOF
 ```
 
-#### 5.3 Create EventListener
-
+### Create TriggerBinding
 ```bash
-# Create EventListener to receive GitHub webhooks
-kubectl apply -f - <<EOF
+cat <<EOF | kubectl apply -f -
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: hello-world-binding
+  namespace: tekton-pipelines
+spec:
+  params:
+  - name: git-repo-url
+    value: \$(body.repository.clone_url)
+  - name: git-revision
+    value: \$(body.head_commit.id)
+EOF
+```
+
+### Create EventListener
+```bash
+cat <<EOF | kubectl apply -f -
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:
-  name: github-webhook-listener
-  namespace: ${TEKTON_NAMESPACE}
+  name: hello-world-listener
+  namespace: tekton-pipelines
 spec:
   serviceAccountName: tekton-triggers-sa
   triggers:
-  - name: github-push-trigger
-    interceptors:
-    - ref:
-        name: "github"
-      params:
-      - name: "secretRef"
-        value:
-          secretName: github-webhook-secret
-          secretKey: secretToken
-      - name: "eventTypes"
-        value: ["push"]
+  - name: hello-world-trigger
     bindings:
-    - ref: github-trigger-binding
+    - ref: hello-world-binding
     template:
-      ref: github-trigger-template
+      ref: hello-world-template
 EOF
 ```
 
-### Step 6: Configure External Access for Webhook
+## 🌐 Step 4: Configure EventListener Access
 
-#### 6.1 Create Webhook Ingress
-
+### Get EventListener Service Information
 ```bash
-# Create Ingress for webhook endpoint
-kubectl apply -f - <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: github-webhook-ingress
-  namespace: ${TEKTON_NAMESPACE}
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-spec:
-  ingressClassName: nginx
-  rules:
-  - host: ${TEKTON_DOMAIN}
-    http:
-      paths:
-      - path: /webhook
-        pathType: Exact
-        backend:
-          service:
-            name: el-github-webhook-listener
-            port:
-              number: 8080
-EOF
+# View EventListener service
+kubectl get svc -n tekton-pipelines | grep el-
+
+# Configure as NodePort service (for external access)
+kubectl patch svc el-hello-world-listener -n tekton-pipelines -p '{"spec":{"type":"NodePort"}}'
+
+# Get access address
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+NODE_PORT=$(kubectl get svc el-hello-world-listener -n tekton-pipelines -o jsonpath='{.spec.ports[0].nodePort}')
+
+echo "EventListener access URL: http://${NODE_IP}:${NODE_PORT}"
 ```
 
-#### 6.2 Wait for EventListener Service
+## ✅ Verify Triggers Configuration
 
+### 1. Check All Triggers Components
 ```bash
-# Wait for EventListener to create service
-sleep 30
+# Check EventListener status
+kubectl get eventlistener -n tekton-pipelines
 
-# Verify EventListener service exists
-kubectl get service el-github-webhook-listener -n ${TEKTON_NAMESPACE}
+# Check TriggerTemplate and TriggerBinding
+kubectl get triggertemplate,triggerbinding -n tekton-pipelines
 
-# Check EventListener pod status
-kubectl get pods -l eventlistener=github-webhook-listener -n ${TEKTON_NAMESPACE}
+# Check services and endpoints
+kubectl get svc,endpoints -n tekton-pipelines | grep el-
 ```
 
-### Step 7: Test Webhook Endpoint
-
-#### 7.1 Test Webhook Connectivity
-
+### 2. Manual Test EventListener
 ```bash
-# Test webhook endpoint connectivity
-echo "Testing webhook endpoint: ${WEBHOOK_URL}"
-
-# Send test payload
-curl -X POST ${WEBHOOK_URL} \
-  -H "Content-Type: application/json" \
-  -H "X-GitHub-Event: push" \
-  -H "X-Hub-Signature-256: sha256=$(echo -n '{"test":"webhook"}' | openssl dgst -sha256 -hmac "${GITHUB_SECRET}" | cut -d' ' -f2)" \
-  -d '{"test":"webhook"}' \
-  -v
-
-# Expected: HTTP 202 Accepted
+# Test EventListener response
+curl -X POST http://${NODE_IP}:${NODE_PORT} \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "repository": {
+      "clone_url": "https://github.com/example/test-repo.git"
+    },
+    "head_commit": {
+      "id": "abcd1234"
+    }
+  }'
 ```
 
-#### 7.2 Manual Pipeline Trigger Test
-
+### 3. Verify Triggered TaskRun
 ```bash
-# Create test PipelineRun to verify pipeline functionality
-kubectl create -f - <<EOF
-apiVersion: tekton.dev/v1
-kind: PipelineRun
-metadata:
-  generateName: manual-test-
-  namespace: ${TEKTON_NAMESPACE}
-spec:
-  pipelineRef:
-    name: github-webhook-pipeline
-  params:
-  - name: repo-url
-    value: "${GITHUB_REPO_URL}"
-  - name: revision
-    value: "main"
-  - name: commit-message
-    value: "Manual test execution"
-  - name: author
-    value: "Administrator"
-EOF
+# View triggered TaskRun
+kubectl get taskruns -n tekton-pipelines
 
-# Wait and check result
-sleep 30
-kubectl get pipelinerun -n ${TEKTON_NAMESPACE} --sort-by=.metadata.creationTimestamp
+# View latest TaskRun logs
+kubectl logs -l tekton.dev/task -n tekton-pipelines --tail=50
 ```
 
-## ✅ Verification Checklist
+### 4. Dashboard Verification
+Verify in Tekton Dashboard:
+- ✅ EventListeners page shows listeners
+- ✅ TaskRuns page shows triggered tasks
+- ✅ Can view real-time execution logs
 
-### Component Status
-
-```bash
-# Check all Triggers components
-kubectl get pods -n ${TEKTON_NAMESPACE} | grep triggers
-
-# Verify EventListener
-kubectl get eventlistener -n ${TEKTON_NAMESPACE}
-
-# Check TriggerBinding and TriggerTemplate
-kubectl get triggerbinding,triggertemplate -n ${TEKTON_NAMESPACE}
-
-# Verify webhook Ingress
-kubectl get ingress github-webhook-ingress -n ${TEKTON_NAMESPACE}
-```
-
-### Functional Testing
-
-```bash
-# Test webhook endpoint
-curl -I ${WEBHOOK_URL}
-# Expected: HTTP 200 or 202
-
-# Check recent PipelineRuns
-kubectl get pipelinerun -n ${TEKTON_NAMESPACE} --sort-by=.metadata.creationTimestamp
-
-# Monitor webhook events
-kubectl logs -l eventlistener=github-webhook-listener -n ${TEKTON_NAMESPACE} -f
-```
-
-## 🔗 GitHub Webhook Configuration
-
-### Configure GitHub Repository Webhook
-
-1. **Navigate to Repository Settings**:
-   - Go to your GitHub repository
-   - Click `Settings` → `Webhooks` → `Add webhook`
-
-2. **Configure Webhook**:
-   ```
-   Payload URL: http://tekton.YOUR_NODE_IP.nip.io/webhook
-   Content type: application/json
-   Secret: 110120119
-   Events: Just the push event
-   Active: ✅ Checked
-   ```
-
-3. **Test Webhook**:
-   - Make a commit and push to the repository
-   - Check webhook deliveries in GitHub
-   - Verify PipelineRun creation in Tekton
-
-### Webhook Testing Commands
-
-```bash
-# Monitor webhook events in real-time
-kubectl logs -l eventlistener=github-webhook-listener -n ${TEKTON_NAMESPACE} -f
-
-# Watch for new PipelineRuns
-kubectl get pipelinerun -n ${TEKTON_NAMESPACE} --watch
-
-# Check webhook Ingress logs
-kubectl logs -l app.kubernetes.io/name=ingress-nginx -n ingress-nginx | grep webhook
-```
-
-## 🚨 Troubleshooting
+## 🔧 Troubleshooting
 
 ### Common Issues
 
-#### 1. EventListener Pod Not Starting
-
+**1. EventListener Pod Cannot Start**
 ```bash
-# Check EventListener status
-kubectl describe eventlistener github-webhook-listener -n ${TEKTON_NAMESPACE}
+# Check RBAC permissions
+kubectl auth can-i create taskruns --as=system:serviceaccount:tekton-pipelines:tekton-triggers-sa -n tekton-pipelines
 
-# Check ServiceAccount permissions
-kubectl describe serviceaccount tekton-triggers-sa -n ${TEKTON_NAMESPACE}
-
-# Verify RBAC
-kubectl auth can-i create pipelinerun --as=system:serviceaccount:${TEKTON_NAMESPACE}:tekton-triggers-sa
+# Check Pod logs
+kubectl logs -l app.kubernetes.io/component=eventlistener -n tekton-pipelines
 ```
 
-#### 2. Webhook Endpoint Not Accessible
-
+**2. Webhook Call Failed**
 ```bash
-# Check Ingress configuration
-kubectl describe ingress github-webhook-ingress -n ${TEKTON_NAMESPACE}
+# Check service endpoints
+kubectl get endpoints el-hello-world-listener -n tekton-pipelines
 
-# Test internal service
-kubectl run test-pod --rm -i --tty --image=alpine:latest -- sh
-# Inside pod: wget -qO- http://el-github-webhook-listener.tekton-pipelines.svc.cluster.local:8080
+# Check network connectivity
+kubectl run test-curl --image=curlimages/curl -it --rm -- curl -v http://el-hello-world-listener.tekton-pipelines.svc.cluster.local:8080
 ```
 
-#### 3. GitHub Webhook Delivery Failures
-
+**3. TriggerTemplate Parameter Error**
 ```bash
-# Check webhook secret
-kubectl get secret github-webhook-secret -n ${TEKTON_NAMESPACE} -o yaml
+# Check TriggerTemplate syntax
+kubectl describe triggertemplate hello-world-template -n tekton-pipelines
 
-# Verify GitHub webhook configuration
-echo "Webhook URL: ${WEBHOOK_URL}"
-echo "Secret: ${GITHUB_SECRET}"
-
-# Test webhook authentication
-curl -X POST ${WEBHOOK_URL} \
-  -H "X-GitHub-Event: ping" \
-  -H "X-Hub-Signature-256: sha256=test" \
-  -d '{"zen":"testing"}' \
-  -v
+# Check parameter binding
+kubectl get triggerbinding hello-world-binding -o yaml -n tekton-pipelines
 ```
 
-#### 4. Pipeline Not Triggered
+## 📊 Performance Optimization
 
+### EventListener Configuration Optimization
 ```bash
-# Check TriggerBinding parameters
-kubectl describe triggerbinding github-trigger-binding -n ${TEKTON_NAMESPACE}
-
-# Verify TriggerTemplate
-kubectl describe triggertemplate github-trigger-template -n ${TEKTON_NAMESPACE}
-
-# Check EventListener logs for errors
-kubectl logs -l eventlistener=github-webhook-listener -n ${TEKTON_NAMESPACE}
+# Configure multiple replicas for high-load scenarios
+kubectl patch eventlistener hello-world-listener -n tekton-pipelines --type='merge' -p='
+{
+  "spec": {
+    "resources": {
+      "kubernetesResource": {
+        "replicas": 3,
+        "serviceType": "LoadBalancer"
+      }
+    }
+  }
+}'
 ```
 
-### Log Collection
+## 📚 Next Steps
 
-```bash
-# Collect Triggers logs
-kubectl logs -l app.kubernetes.io/name=tekton-triggers-controller -n ${TEKTON_NAMESPACE} > triggers-controller.log
-kubectl logs -l eventlistener=github-webhook-listener -n ${TEKTON_NAMESPACE} > eventlistener.log
+After Triggers configuration is complete, you can:
+1. Configure GitHub Webhooks (automated CI/CD)
+2. Deploy GPU scientific computing Pipeline
 
-# Collect webhook test results
-curl -X POST ${WEBHOOK_URL} -H "Content-Type: application/json" -d '{"test":"debug"}' > webhook-test.log 2>&1
-```
-
-## 📊 Production Considerations
-
-### Security
-
-- ✅ Webhook secret authentication configured
-- ✅ RBAC with minimal required permissions
-- ✅ Network policies for event listener access
-- ✅ TLS termination at Ingress (configure separately)
-
-### Monitoring
-
-- ✅ EventListener health checks
-- ✅ Webhook delivery monitoring
-- ✅ Pipeline execution metrics
-- ✅ Failed trigger alerting (configure separately)
-
-### Scalability
-
-- ✅ EventListener horizontal scaling ready
-- ✅ Webhook processing rate limits
-- ✅ Pipeline concurrency controls
-- ✅ Resource quotas for triggered workloads
-
-## 🔄 Next Steps
-
-After successful completion of Stage 2:
-
-1. **Test Automatic Triggering**: Push code to GitHub and verify Pipeline execution
-2. **Configure Additional Triggers**: Add more event types or repositories
-3. **Enhance Pipelines**: Add build, test, and deployment steps
-4. **Setup Monitoring**: Configure alerting for failed pipelines
-
-```bash
-# Verify complete installation
-echo "✅ Stage 2 completed successfully!"
-echo "🚀 Your CI/CD automation is ready!"
-echo "📖 Webhook URL: ${WEBHOOK_URL}"
-echo "🔧 Dashboard: http://${TEKTON_DOMAIN}/"
-```
-
----
-
-## 📚 Additional Resources
-
-- **Tekton Triggers Documentation**: https://tekton.dev/docs/triggers/
-- **GitHub Webhooks**: https://docs.github.com/en/developers/webhooks-and-events/webhooks
-- **EventListener Configuration**: https://tekton.dev/docs/triggers/eventlisteners/
-- **TriggerBinding and TriggerTemplate**: https://tekton.dev/docs/triggers/triggerbindings/ 
+Continue reading: [03-tekton-webhook-configuration.md](03-tekton-webhook-configuration.md) 

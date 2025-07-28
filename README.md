@@ -1,260 +1,205 @@
-# Tekton Pipelines CLI (`tkn`)
+# Tekton GPU Scientific Computing Pipeline
 
-[![Go Report Card](https://goreportcard.com/badge/tektoncd/cli)](https://goreportcard.com/report/tektoncd/cli)
-[![CII Best Practices](https://bestpractices.coreinfrastructure.org/projects/6510/badge)](https://bestpractices.coreinfrastructure.org/projects/6510)
+Complete migration guide and implementation for moving GitHub Actions GPU scientific computing workflows to Tekton.
 
-<p align="center">
-<img width="250" height="175" src="https://github.com/cdfoundation/artwork/blob/main/tekton/additional-artwork/tekton-cli/color/tektoncli_color.svg" alt="Tekton logo"></img>
-</p>
+## 🎯 Project Overview
 
-The _Tekton Pipelines CLI_ project provides a command-line interface (CLI) for interacting with [Tekton](https://tekton.dev/), an open-source framework for Continuous Integration and Delivery (CI/CD) systems.
+This project provides a complete solution for migrating GPU-accelerated scientific computing workflows from GitHub Actions to Tekton on Kubernetes. It includes all necessary configurations, documentation, and automation scripts for a seamless transition.
 
-## Installing `tkn`
+### Original GitHub Actions Workflow
+- Docker Compose GPU container startup
+- Papermill Jupyter Notebook execution
+- HTML conversion with jupyter nbconvert
+- PyTest execution with test repository
+- Artifact generation (coverage.xml, pytest_results.xml, pytest_report.html)
 
-Download the latest binary executable for your operating system.
+### New Tekton Pipeline
+- GPU-accelerated Tekton Tasks
+- Kubernetes-native workflow orchestration
+- GitHub Webhook integration
+- Identical output artifacts
 
-### Mac OS X
+## 📁 Project Structure
 
-- Use [Homebrew](https://brew.sh)
-
-```shell
-  brew install tektoncd-cli
+```
+Real-world_Tekton_Installation_Guide/
+├── docs/                                    # Documentation
+│   ├── zh/                                  # Chinese documentation
+│   │   ├── 01-tekton-installation.md        # Tekton installation
+│   │   ├── 02-tekton-triggers-setup.md      # Triggers configuration
+│   │   ├── 03-tekton-webhook-configuration.md # Webhook setup
+│   │   └── 04-gpu-pipeline-deployment.md    # GPU pipeline deployment
+│   └── en/                                  # English documentation
+│       ├── 01-tekton-installation.md
+│       ├── 02-tekton-triggers-setup.md
+│       ├── 03-tekton-webhook-configuration.md
+│       └── 04-gpu-pipeline-deployment.md
+├── examples/                                # Tekton configurations
+│   ├── tasks/                              # Task definitions
+│   │   ├── gpu-env-preparation-task.yaml
+│   │   ├── gpu-papermill-execution-task.yaml
+│   │   ├── jupyter-nbconvert-task.yaml
+│   │   └── pytest-execution-task.yaml
+│   ├── pipelines/                          # Pipeline definitions
+│   │   └── gpu-scientific-computing-pipeline.yaml
+│   └── triggers/                           # Trigger configurations
+│       ├── gpu-pipeline-rbac.yaml
+│       └── gpu-pipeline-trigger-template.yaml
+├── scripts/                                # Deployment scripts
+│   ├── deploy-complete-pipeline.sh         # One-click deployment
+│   ├── verify-deployment.sh               # Deployment verification
+│   ├── install/                           # Installation scripts
+│   ├── cleanup/                           # Cleanup scripts
+│   └── utils/                             # Utility scripts
+├── notebooks/                              # Sample notebooks
+│   └── 01_scRNA_analysis_preprocessing.ipynb
+└── docker-compose/                        # Original Docker setup
+    └── docker-compose-nb-2504.yaml
 ```
 
-- Use [released tarball](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Darwin_all.tar.gz)
+## 🚀 Quick Start
 
-  ```shell
-  # Get the tar.xz
-  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Darwin_all.tar.gz
-  # Extract tkn to your PATH (e.g. /usr/local/bin)
-  sudo tar xvzf tkn_0.40.0_Darwin_all.tar.gz -C /usr/local/bin tkn
-  ```
+### Prerequisites
+- Kubernetes cluster with GPU support
+- kubectl configured and connected
+- NVIDIA GPU Operator installed
+- GitHub repository with Jupyter notebooks
 
-### Windows
-
-- Use [Chocolatey](https://chocolatey.org/packages/tektoncd-cli)
-
-```shell
-choco install tektoncd-cli --confirm
-```
-
-- Use [Scoop](https://scoop.sh)
-```powershell
-scoop install tektoncd-cli
-```
-
-- Use [Powershell](https://docs.microsoft.com/en-us/powershell) [released zip](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Windows_x86_64.zip)
-
-```powershell
-#Create directory
-New-Item -Path "$HOME/tektoncd/cli" -Type Directory
-# Download file
-Start-BitsTransfer -Source https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Windows_x86_64.zip -Destination "$HOME/tektoncd/cli/."
-# Uncompress zip file
-Expand-Archive $HOME/tektoncd/cli/*.zip -DestinationPath C:\Users\Developer\tektoncd\cli\.
-#Add to Windows `Environment Variables`
-[Environment]::SetEnvironmentVariable("Path",$($env:Path + ";$Home\tektoncd\cli"),'User')
-```
-
-### Linux tarballs
-
-* [Linux AMD 64](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_x86_64.tar.gz)
-
-  ```shell
-  # Get the tar.xz
-  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_x86_64.tar.gz
-  # Extract tkn to your PATH (e.g. /usr/local/bin)
-  sudo tar xvzf tkn_0.40.0_Linux_x86_64.tar.gz -C /usr/local/bin/ tkn
-  ```
-
-* [Linux AARCH 64](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_aarch64.tar.gz)
-
-  ```shell
-  # Get the tar.xz
-  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_aarch64.tar.gz
-  # Extract tkn to your PATH (e.g. /usr/local/bin)
-  sudo tar xvzf tkn_0.40.0_Linux_aarch64.tar.gz -C /usr/local/bin/ tkn
-  ```
-
-* [Linux IBM Z](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_s390x.tar.gz)
-
-  ```shell
-  # Get the tar.gz
-  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_s390x.tar.gz
-  # Extract tkn to your PATH (e.g. /usr/local/bin)
-  sudo tar xvzf tkn_0.40.0_Linux_s390x.tar.gz -C /usr/local/bin/ tkn
-  ```
-
-* [Linux IBM P](https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_ppc64le.tar.gz)
-
-  ```shell
-  # Get the tar.gz
-  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tkn_0.40.0_Linux_ppc64le.tar.gz
-  # Extract tkn to your PATH (e.g. /usr/local/bin)
-  sudo tar xvzf tkn_0.40.0_Linux_ppc64le.tar.gz -C /usr/local/bin/ tkn
-  ```
-
-### Linux RPMs
-
-  If you are running on any of the following rpm based distros:
-
-  * Latest Fedora and the two versions behind.
-  * Centos Stream
-  * EPEL
-  * Latest RHEL
-
-  you would be able to use [@chmouel](https://github.com/chmouel)'s unofficial copr package
-  repository by running the following commands:
-
-  ```shell
-  dnf copr enable chmouel/tektoncd-cli
-  dnf install tektoncd-cli
-  ```
-
-  * [Binary RPM package](https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.rpm)
-
-  On any other RPM based distros, you can install the rpm directly:
-
-   ```shell
-    rpm -Uvh https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.rpm
-   ```
-
-### Linux Debs
-
-  * [Ubuntu PPA](https://launchpad.net/~tektoncd/+archive/ubuntu/cli/+packages)
-
-  If you are running on the latest rolling Ubuntu or Debian, you can use the TektonCD CLI PPA:
-
-  ```shell
-  sudo apt update;sudo apt install -y gnupg
-  sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 3EFE0E0A2F2F60AA
-  echo "deb http://ppa.launchpad.net/tektoncd/cli/ubuntu oracular main"|sudo tee /etc/apt/sources.list.d/tektoncd-ubuntu-cli.list
-  sudo apt update && sudo apt install -y tektoncd-cli
-  ```
-
-  The PPA may work with older releases, but that hasn't been tested.
-
-  * [Binary DEB package](https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.deb)
-
-  On any other Debian or Ubuntu based distro, you can simply install the binary package directly with `dpkg`:
-
-  ```shell
-  curl -LO https://github.com/tektoncd/cli/releases/download/v0.40.0/tektoncd-cli-0.40.0_Linux-64bit.deb
-  dpkg -i tektoncd-cli-0.40.0_Linux-64bit.deb
-  ```
-
-### NixOS/Nix
-
-You can install `tektoncd-cli` from [nixpkgs](https://github.com/NixOS/nixpkgs) on any system that supports the `nix` package manager.
-
-```shell
-nix-env --install tektoncd-cli
-```
-### Arch / Manjaro
-
-You can install [`tekton-cli`](https://archlinux.org/packages/extra/x86_64/tekton-cli/) from the official arch package repository :
-
-```shell
-pacman -S tekton-cli
-```
-
-### Homebrew on Linux
-
-You can install the latest tektoncd-cli if you are using [Homebrew on Linux](https://docs.brew.sh/Homebrew-on-Linux) as for the osx version you need to simply do :
-
-```shell
-brew install tektoncd-cli
-```
-
-### Source install
-
-  If you have [go](https://golang.org/) installed and you want to compile the CLI from source, you can checkout the [Git repository](https://github.com/tektoncd/cli) and run the following commands:
-
-  ```shell
-  make bin/tkn
-  ```
-
-  This will output the `tkn` binary in `bin/tkn`
-
-### `tkn` as a `kubectl` plugin
-
-`kubectl` will find any binary named `kubectl-*` on your PATH and consider it as a plugin.
-After installing tkn, create a link as kubectl-tkn
-  ```shell
-ln -s /usr/local/bin/tkn /usr/local/bin/kubectl-tkn
-  ```
-For Mac OS X with Homebrew
-  ```shell
-ln -s $(brew --prefix)/opt/tektoncd-cli/bin/tkn /usr/local/bin/kubectl-tkn
-  ```
-Run the following to confirm tkn is available as a plugin:
-  ```shell
-kubectl plugin list
-  ```
-You should see the following after running kubectl plugin list if tkn is available as a plugin:
-  ```shell
-/usr/local/bin/kubectl-tkn
-```
-If the output above is shown, run kubectl-tkn to see the list of available tkn commands to run.
-
-## Useful Commands
-
-The following commands help you understand and effectively use the Tekton CLI:
-
- * `tkn help:` Displays a list of the commands with helpful information.
- * [`tkn bundle:`](docs/cmd/tkn_bundle.md) Manage Tekton [bundles](https://github.com/tektoncd/pipeline/blob/main/docs/tekton-bundle-contracts.md)
- * [`tkn clustertriggerbinding:`](docs/cmd/tkn_clustertriggerbinding.md) Parent command of the ClusterTriggerBinding command group.
- * [`tkn completion:`](docs/cmd/tkn_completion.md) Outputs a BASH, ZSH, Fish or PowerShell completion script for `tkn` to allow command completion with Tab.
- * [`tkn customrun:`](docs/cmd/tkn_customrun.md) Parent command of the Customrun command group.
- * [`tkn eventlistener:`](docs/cmd/tkn_eventlistener.md) Parent command of the Eventlistener command group.
- * [`tkn hub:`](docs/cmd/tkn_hub.md) Search and install Tekton Resources from [Hub](https://hub.tekton.dev)
- * [`tkn pipeline:`](docs/cmd/tkn_pipeline.md) Parent command of the Pipeline command group.
- * [`tkn pipelinerun:`](docs/cmd/tkn_pipelinerun.md) Parent command of the Pipelinerun command group.
- * [`tkn task:`](docs/cmd/tkn_task.md) Parent command of the Task command group.
- * [`tkn taskrun:`](docs/cmd/tkn_taskrun.md) Parent command of the Taskrun command group.
- * [`tkn triggerbinding:`](docs/cmd/tkn_triggerbinding.md) Parent command of the Triggerbinding command group.
- * [`tkn triggertemplate:`](docs/cmd/tkn_triggertemplate.md) Parent command of the Triggertemplate command group.
- * [`tkn version:`](docs/cmd/tkn_version.md) Outputs the cli version.
-
-For every `tkn` command, you can use `-h` or `--help` flags to display specific help for that command.
-
-## Disable Color and Emojis in Output
-
-For many `tkn` commands, color and emojis by default will appear in command
-output.
-
-It will only shows if you are in interactive shell with a [standard
-input](https://en.wikipedia.org/wiki/Standard_streams#Standard_input_(stdin))
-attached. If you pipe the tkn command or run it in a non interactive way (ie:
-from tekton itself in a Task) the coloring and emojis will *always* be disabled.
-
-`tkn` offers two approaches for disabling color and emojis from command output.
-
-To remove the color and emojis from all `tkn` command output, set the environment variable `NO_COLOR`, such as shown below:
-
-```shell
-export NO_COLOR=""
-```
-
-More information on `NO_COLOR` can be found in the [`NO_COLOR` documentation](https://no-color.org/).
-
-To remove color and emojis from the output of a single command execution, the `--no-color` option can be used with any command,
-such as in the example below:
+### One-Click Deployment
 
 ```bash
-tkn taskrun describe --no-color
+chmod +x scripts/deploy-complete-pipeline.sh
+./scripts/deploy-complete-pipeline.sh
 ```
 
+### Verify Deployment
 
-## Want to contribute
+```bash
+chmod +x scripts/verify-deployment.sh
+./scripts/verify-deployment.sh
+```
 
-We are so excited to have you!
+### Step-by-Step Deployment
 
-- See [CONTRIBUTING.md](CONTRIBUTING.md) for an overview of our processes
-- See [DEVELOPMENT.md](DEVELOPMENT.md) for how to get started
-- See [ROADMAP.md](ROADMAP.md) for the current roadmap
-- See [releases.md][releases.md] for our release cadence and processes
-- Look at our
-  [good first issues](https://github.com/tektoncd/cli/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-  and our
-  [help wanted issues](https://github.com/tektoncd/cli/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
+1. **Install Tekton Core Components**
+   - Follow: `docs/en/01-tekton-installation.md` or `docs/zh/01-tekton-installation.md`
+
+2. **Configure Tekton Triggers**
+   - Follow: `docs/en/02-tekton-triggers-setup.md` or `docs/zh/02-tekton-triggers-setup.md`
+
+3. **Setup GitHub Webhooks**
+   - Follow: `docs/en/03-tekton-webhook-configuration.md` or `docs/zh/03-tekton-webhook-configuration.md`
+
+4. **Deploy GPU Pipeline**
+   - Follow: `docs/en/04-gpu-pipeline-deployment.md` or `docs/zh/04-gpu-pipeline-deployment.md`
+
+## 🔧 Pipeline Components
+
+### Tasks
+- **gpu-env-preparation**: Environment setup and code checkout
+- **gpu-papermill-execution**: GPU-accelerated notebook execution
+- **jupyter-nbconvert**: Notebook to HTML conversion
+- **pytest-execution**: Test execution and reporting
+
+### Pipeline Flow
+1. Environment preparation → 2. GPU notebook execution → 3. HTML conversion → 4. Test execution
+
+### Triggers
+- GitHub push events to main/develop branches
+- Commit messages containing [gpu] or [notebook] tags
+- File changes in notebooks/ directory
+
+## 📊 Dashboard Access
+
+After deployment, access the Tekton Dashboard:
+```bash
+# Get Dashboard URL
+kubectl get svc tekton-dashboard -n tekton-pipelines
+```
+
+View your Pipeline executions, Tasks, and real-time logs through the web interface.
+
+## 🔗 GitHub Webhook Configuration
+
+The deployment script will provide webhook configuration details:
+- **Payload URL**: Your EventListener service endpoint
+- **Content Type**: application/json
+- **Secret**: Generated automatically and saved to webhook-secret.txt
+- **Events**: Push events
+
+## 📋 Generated Artifacts
+
+The pipeline generates the same artifacts as the original GitHub Actions:
+- `executed_notebook.ipynb` - Executed notebook
+- `executed_notebook.html` - HTML report
+- `coverage.xml` - Code coverage report
+- `pytest_results.xml` - JUnit test results
+- `pytest_report.html` - HTML test report
+
+## 🔍 Monitoring and Verification
+
+### Check Pipeline Status
+```bash
+# List all pipeline runs
+kubectl get pipelineruns -n tekton-pipelines
+
+# View specific run details
+kubectl describe pipelinerun <name> -n tekton-pipelines
+
+# View logs
+kubectl logs -f <pod-name> -n tekton-pipelines
+```
+
+### GPU Resource Monitoring
+```bash
+# Check GPU nodes
+kubectl get nodes -l accelerator=nvidia-tesla-gpu
+
+# Monitor GPU usage during execution
+kubectl exec -it <gpu-pod> -n tekton-pipelines -- nvidia-smi
+```
+
+## 🔧 Troubleshooting
+
+### Common Issues
+1. **GPU Scheduling**: Ensure nodes are labeled with GPU accelerator
+2. **Webhook Failures**: Check EventListener logs and GitHub webhook delivery
+3. **Task Failures**: Review individual task logs for specific errors
+
+### Log Collection
+```bash
+# EventListener logs
+kubectl logs -l app.kubernetes.io/component=eventlistener -n tekton-pipelines
+
+# Pipeline execution logs
+kubectl logs -l tekton.dev/pipeline=gpu-scientific-computing-pipeline -n tekton-pipelines
+```
+
+## 📚 Documentation
+
+- **Installation Guide**: Complete Tekton setup instructions
+- **Configuration Guide**: Triggers and webhook configuration
+- **Deployment Guide**: GPU pipeline deployment steps
+- **Troubleshooting**: Common issues and solutions
+
+All documentation is available in both English (`docs/en/`) and Chinese (`docs/zh/`).
+
+## 🤝 Contributing
+
+This project provides a complete reference implementation. Customize the Tasks, Pipeline, and configurations according to your specific requirements.
+
+## 📄 License
+
+See LICENSE file for details.
+
+---
+
+## 🎉 Success Metrics
+
+After successful deployment:
+- ✅ Tekton Dashboard accessible
+- ✅ GPU pipeline visible in Dashboard
+- ✅ GitHub webhooks triggering pipeline runs
+- ✅ Notebook execution on GPU resources
+- ✅ Test artifacts generated successfully
+- ✅ Complete CI/CD automation achieved

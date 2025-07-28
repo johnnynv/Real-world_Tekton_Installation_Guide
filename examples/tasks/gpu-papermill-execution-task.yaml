@@ -58,6 +58,15 @@ spec:
   steps:
   - name: gpu-papermill-execute
     image: $(params.container-image)
+    computeResources:
+      requests:
+        nvidia.com/gpu: "1"
+        memory: "16Gi"
+        cpu: "4"
+      limits:
+        nvidia.com/gpu: "1"
+        memory: "32Gi"
+        cpu: "8"
     env:
     - name: NVIDIA_VISIBLE_DEVICES
       value: "all"
@@ -75,15 +84,6 @@ spec:
       value: "/workspace/shared/artifacts"
     - name: OUTPUT_NOTEBOOK
       value: $(params.output-notebook-name)
-    resources:
-      limits:
-        nvidia.com/gpu: $(params.gpu-count)
-        memory: $(params.memory-limit)
-        cpu: $(params.cpu-limit)
-      requests:
-        nvidia.com/gpu: $(params.gpu-count)
-        memory: "16Gi"
-        cpu: "4"
     script: |
       #!/bin/bash
       set -eu
@@ -148,21 +148,7 @@ spec:
       mkdir -p "${CUPY_CACHE_DIR}" "${NUMBA_CACHE_DIR}"
       
       echo "🧪 Testing GPU availability in Python..."
-      python3 -c "
-import sys
-try:
-    import cupy as cp
-    print(f'✅ CuPy available, GPU count: {cp.cuda.runtime.getDeviceCount()}')
-    
-    # Test basic GPU operation
-    x = cp.array([1, 2, 3])
-    y = x * 2
-    print(f'✅ Basic GPU operation successful: {y}')
-except ImportError:
-    print('ℹ️  CuPy not available, will use CPU fallback')
-except Exception as e:
-    print(f'⚠️  GPU test failed: {e}, will continue with available resources')
-" || echo "ℹ️  GPU test completed with warnings"
+      echo "ℹ️  GPU test will be performed during notebook execution"
       
       # Execute notebook with papermill
       echo "🔥 Executing notebook with Papermill..."
@@ -246,39 +232,13 @@ except Exception as e:
       if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}" ]; then
         echo "✅ Output notebook file exists"
         
-        # Validate JSON structure
-        python3 -c "
-import json
-import sys
-
-try:
-    with open('${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}', 'r') as f:
-        notebook = json.load(f)
-    
-    cell_count = len(notebook.get('cells', []))
-    print(f'✅ Valid notebook JSON with {cell_count} cells')
-    
-    # Check for execution metadata
-    executed_cells = 0
-    for cell in notebook.get('cells', []):
-        if cell.get('cell_type') == 'code' and 'execution_count' in cell:
-            if cell['execution_count'] is not None:
-                executed_cells += 1
-    
-    print(f'📊 Executed code cells: {executed_cells}')
-    
-    if executed_cells > 0:
-        print('✅ Notebook appears to have been executed successfully')
-    else:
-        print('⚠️  No executed cells found, notebook may not have run properly')
-        
-except json.JSONDecodeError as e:
-    print(f'❌ Invalid JSON in output notebook: {e}')
-    sys.exit(1)
-except Exception as e:
-    print(f'❌ Error validating notebook: {e}')
-    sys.exit(1)
-"
+        # Simple JSON validation
+        if python3 -c "import json; json.load(open('${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}'))" 2>/dev/null; then
+          echo "✅ Valid notebook JSON structure"
+        else
+          echo "❌ Invalid JSON in output notebook"
+          exit 1
+        fi
         
         # Check for papermill execution metadata
         if grep -q "papermill" "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}"; then

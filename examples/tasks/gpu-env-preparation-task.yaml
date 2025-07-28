@@ -130,37 +130,8 @@ spec:
         NOTEBOOK_SIZE=$(du -h "${NOTEBOOK_PATH}" | cut -f1)
         echo "📊 Notebook size: ${NOTEBOOK_SIZE}"
         
-        # Check for GPU-related imports in notebook
-        if command -v python3 &> /dev/null; then
-          python3 -c "
-import json
-import sys
-
-try:
-    with open('${NOTEBOOK_PATH}', 'r') as f:
-        notebook = json.load(f)
-    
-    gpu_imports = ['cupy', 'cudf', 'cuml', 'cugraph', 'cuda', 'torch', 'tensorflow']
-    found_gpu = False
-    
-    for cell in notebook.get('cells', []):
-        if cell.get('cell_type') == 'code':
-            source = ''.join(cell.get('source', []))
-            for gpu_lib in gpu_imports:
-                if gpu_lib in source.lower():
-                    print(f'🎯 Found GPU library reference: {gpu_lib}')
-                    found_gpu = True
-    
-    if found_gpu:
-        print('✅ GPU dependencies detected - GPU resources will be required')
-    else:
-        print('ℹ️  No explicit GPU dependencies found in notebook')
-        
-except Exception as e:
-    print(f'⚠️  Could not analyze notebook: {e}')
-    sys.exit(0)  # Don't fail the task for this
-"
-        fi
+        # Simple validation without complex Python parsing
+        echo "ℹ️  GPU dependencies will be validated during notebook execution"
       else
         echo "❌ Target notebook not found: ${NOTEBOOK_PATH}"
         exit 1

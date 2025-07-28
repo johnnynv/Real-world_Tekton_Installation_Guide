@@ -28,10 +28,6 @@ spec:
     description: Whether to embed images in HTML
     type: string
     default: "true"
-  - name: execute-preprocessor
-    description: Whether to re-execute notebook during conversion
-    type: string
-    default: "false"
   workspaces:
   - name: shared-storage
     description: Shared storage for input notebook and output HTML
@@ -63,225 +59,41 @@ spec:
       echo "📁 Shared workspace: ${WORKSPACE_SHARED_PATH}"
       echo "📓 Input notebook: ${INPUT_NOTEBOOK}"
       echo "🌐 Output HTML: ${OUTPUT_NOTEBOOK_HTML}"
-      echo "📝 Template: $(params.nbconvert-template)"
       
-      # Switch to shared workspace
       cd "${WORKSPACE_SHARED_PATH}"
       
-      # Verify input notebook exists
       if [ ! -f "${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}" ]; then
         echo "❌ Input notebook not found: ${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}"
-        echo "📁 Available files in artifacts directory:"
-        ls -la "${DOCKER_WRITEABLE_DIR}/" || echo "Artifacts directory not found"
         exit 1
       fi
       
       echo "✅ Input notebook found: ${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}"
-      INPUT_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}" | cut -f1)
-      echo "📊 Input notebook size: ${INPUT_SIZE}"
       
-      # Install nbconvert if not available
-      echo "🔧 Installing Jupyter nbconvert..."
-      pip install --quiet --no-cache-dir nbconvert[webpdf] || {
-        echo "ℹ️  Installing basic nbconvert without webpdf extras..."
-        pip install --quiet --no-cache-dir nbconvert
-      }
+      pip install --quiet --no-cache-dir nbconvert
       
-      # Install additional dependencies for better HTML output
-      pip install --quiet --no-cache-dir beautifulsoup4 bleach || {
-        echo "⚠️  Some optional dependencies failed to install, continuing..."
-      }
-      
-      # Prepare nbconvert command options
       NBCONVERT_OPTIONS=""
-      
       if [ "$(params.embed-images)" = "true" ]; then
         NBCONVERT_OPTIONS="${NBCONVERT_OPTIONS} --embed-images"
-        echo "🖼️  Images will be embedded in HTML"
       fi
       
-      if [ "$(params.execute-preprocessor)" = "true" ]; then
-        NBCONVERT_OPTIONS="${NBCONVERT_OPTIONS} --execute"
-        echo "⚡ Notebook will be re-executed during conversion"
-      else
-        echo "📋 Using existing execution results"
-      fi
-      
-      # Create output directory if needed
-      mkdir -p "$(dirname "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}")"
-      
-      echo "🔄 Converting notebook to HTML..."
-      echo "📝 Command: jupyter nbconvert --to $(params.nbconvert-template) \"${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}\" --output \"${OUTPUT_NOTEBOOK_HTML}\" --output-dir \"${DOCKER_WRITEABLE_DIR}\""
-      
-      # Perform conversion with comprehensive logging
       jupyter nbconvert --to $(params.nbconvert-template) \
         "${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}" \
         --output "${OUTPUT_NOTEBOOK_HTML}" \
         --output-dir "${DOCKER_WRITEABLE_DIR}" \
         ${NBCONVERT_OPTIONS} \
-        --log-level=INFO \
         > "${DOCKER_WRITEABLE_DIR}/jupyter_nbconvert.log" 2>&1
       
-      CONVERT_EXIT_CODE=$?
-      
-      # Check conversion results
-      if [ $CONVERT_EXIT_CODE -eq 0 ]; then
-        echo "✅ Jupyter nbconvert completed successfully"
-        
-        # Verify output HTML was created
-        if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" ]; then
-          echo "✅ HTML file created successfully"
-          HTML_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" | cut -f1)
-          echo "📊 HTML file size: ${HTML_SIZE}"
-          
-          # Save results
-          echo -n "success" > "$(results.conversion-status.path)"
-          echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" > "$(results.output-html-path.path)"
-          echo -n "${HTML_SIZE}" > "$(results.html-size.path)"
-          
-        else
-          echo "❌ HTML file not found after conversion"
-          echo -n "error" > "$(results.conversion-status.path)"
-          exit 1
-        fi
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" ]; then
+        echo "✅ HTML file created successfully"
+        HTML_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" | cut -f1)
+        echo -n "success" > "$(results.conversion-status.path)"
+        echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" > "$(results.output-html-path.path)"
+        echo -n "${HTML_SIZE}" > "$(results.html-size.path)"
       else
-        echo "❌ Jupyter nbconvert failed with exit code: $CONVERT_EXIT_CODE"
-        
-        # Show conversion log for debugging
-        echo "🔍 Conversion log contents:"
-        cat "${DOCKER_WRITEABLE_DIR}/jupyter_nbconvert.log" || echo "No conversion log available"
-        
+        echo "❌ HTML file not found after conversion"
         echo -n "failed" > "$(results.conversion-status.path)"
         exit 1
       fi
-      
-      echo "🎉 HTML conversion task completed successfully!"
-      
-  - name: validate-html-output
-    image: python:3.12-slim
-    env:
-    - name: WORKSPACE_SHARED_PATH
-      value: $(workspaces.shared-storage.path)
-    - name: DOCKER_WRITEABLE_DIR
-      value: "/workspace/shared/artifacts"
-    - name: OUTPUT_NOTEBOOK_HTML
-      value: $(params.output-html-name)
-    script: |
-      #!/bin/bash
-      set -eu
-      
-      echo "🔍 Validating HTML output..."
-      cd "${WORKSPACE_SHARED_PATH}"
-      
-      # Install HTML validation dependencies
-      pip install --quiet --no-cache-dir beautifulsoup4 lxml || {
-        echo "⚠️  HTML validation dependencies not available, performing basic checks"
-      }
-      
-      # Check if HTML file exists
-      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" ]; then
-        echo "✅ HTML file exists: ${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}"
-        
-        # Check file size
-        HTML_SIZE_BYTES=$(stat -c%s "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}")
-        if [ "$HTML_SIZE_BYTES" -gt 1000 ]; then
-          echo "✅ HTML file size appears reasonable: $HTML_SIZE_BYTES bytes"
-        else
-          echo "⚠️  HTML file seems too small: $HTML_SIZE_BYTES bytes"
-        fi
-        
-        # Basic HTML structure validation
-        python3 -c "
-import sys
-import os
-
-html_file = '${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}'
-
-try:
-    with open(html_file, 'r', encoding='utf-8') as f:
-        content = f.read()
-    
-    # Basic HTML structure checks
-    if '<html' in content.lower():
-        print('✅ HTML document structure found')
-    else:
-        print('⚠️  HTML document structure not detected')
-    
-    if '<body' in content.lower():
-        print('✅ HTML body found')
-    else:
-        print('⚠️  HTML body not found')
-    
-    # Check for notebook content indicators
-    if 'jupyter' in content.lower() or 'notebook' in content.lower():
-        print('✅ Jupyter notebook content detected')
-    else:
-        print('ℹ️  No explicit Jupyter content markers found')
-    
-    # Check for code cells
-    if 'highlight' in content.lower() or 'code' in content.lower():
-        print('✅ Code highlighting/cells detected')
-    else:
-        print('ℹ️  No code highlighting detected')
-    
-    # Check for potential errors in HTML
-    if 'error' in content.lower() and 'traceback' in content.lower():
-        print('⚠️  Potential error content found in HTML (please review)')
-    else:
-        print('✅ No obvious error content detected')
-    
-    print(f'📊 Total HTML content length: {len(content):,} characters')
-    
-    # Advanced validation with BeautifulSoup if available
-    try:
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(content, 'html.parser')
-        
-        # Count different elements
-        div_count = len(soup.find_all('div'))
-        pre_count = len(soup.find_all('pre'))
-        img_count = len(soup.find_all('img'))
-        
-        print(f'📈 HTML structure analysis:')
-        print(f'   - Div elements: {div_count}')
-        print(f'   - Pre elements (code blocks): {pre_count}')
-        print(f'   - Images: {img_count}')
-        
-        # Check for title
-        title = soup.find('title')
-        if title:
-            print(f'📝 Document title: {title.get_text()[:100]}...')
-        else:
-            print('ℹ️  No document title found')
-            
-    except ImportError:
-        print('ℹ️  BeautifulSoup not available for advanced HTML validation')
-    except Exception as e:
-        print(f'⚠️  Advanced HTML validation failed: {e}')
-    
-except Exception as e:
-    print(f'❌ Error validating HTML file: {e}')
-    sys.exit(1)
-"
-        
-        # Check conversion log if available
-        if [ -f "${DOCKER_WRITEABLE_DIR}/jupyter_nbconvert.log" ]; then
-          echo "📋 Checking conversion log..."
-          
-          if grep -i "error\|exception\|failed" "${DOCKER_WRITEABLE_DIR}/jupyter_nbconvert.log" > /dev/null; then
-            echo "⚠️  Potential issues found in conversion log:"
-            grep -i "error\|exception\|failed" "${DOCKER_WRITEABLE_DIR}/jupyter_nbconvert.log" | tail -3
-          else
-            echo "✅ No errors found in conversion log"
-          fi
-        fi
-        
-      else
-        echo "❌ HTML file not found: ${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}"
-        exit 1
-      fi
-      
-      echo "✅ HTML validation completed"
       
   - name: prepare-for-testing
     image: alpine:latest
@@ -296,33 +108,15 @@ except Exception as e:
       #!/bin/sh
       set -eu
       
-      echo "📋 Preparing HTML file for next stage (testing)..."
+      echo "📋 Preparing HTML file for testing..."
       cd "${WORKSPACE_SHARED_PATH}"
       
-      # Create a staging area for the HTML file that will be used in testing
       mkdir -p "${DOCKER_WRITEABLE_DIR}/staging"
       
       if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" ]; then
-        # Copy HTML file to staging area
         cp "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" "${DOCKER_WRITEABLE_DIR}/staging/"
-        echo "✅ HTML file copied to staging area"
-        
-        # Create a simple metadata file
-        cat > "${DOCKER_WRITEABLE_DIR}/staging/conversion_metadata.txt" << EOF
-conversion_timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-input_notebook=$(params.input-notebook-name)
-output_html=$(params.output-html-name)
-conversion_template=$(params.nbconvert-template)
-embed_images=$(params.embed-images)
-EOF
-        
-        echo "✅ Metadata file created"
-        echo "📁 Staging area contents:"
-        ls -la "${DOCKER_WRITEABLE_DIR}/staging/"
-        
+        echo "✅ HTML file prepared for testing"
       else
-        echo "❌ HTML file not found for staging"
+        echo "❌ HTML file not found"
         exit 1
       fi
-      
-      echo "✅ HTML preparation for testing completed" 
