@@ -814,13 +814,125 @@ kubectl exec -it <gpu-pod-name> -n tekton-pipelines -- nvidia-smi
 kubectl top pod <gpu-pod-name> -n tekton-pipelines --containers
 ```
 
+## 🚀 手动执行 Pipeline
+
+项目提供了专门的脚本来简化pipeline的验证、运行和监控：
+
+### 🔍 完整验证（推荐首次使用）
+
+在首次部署或遇到问题时，建议先运行完整验证：
+
+```bash
+# 进入项目目录
+cd Real-world_Tekton_Installation_Guide
+
+# 给脚本添加执行权限
+chmod +x scripts/validate-gpu-pipeline.sh
+
+# 执行端到端验证
+./scripts/validate-gpu-pipeline.sh validate
+```
+
+验证脚本会按顺序执行：
+1. **基础环境验证** - 检查K8s集群、GPU资源、Tekton组件
+2. **存储和Workspace验证** - 测试PVC和基础workspace功能
+3. **GPU访问验证** - 独立验证GPU硬件访问
+4. **Tekton Task验证** - 测试修复版本的tasks
+5. **完整Pipeline验证** - 执行端到端的scientific computing pipeline
+
+### 📊 基本执行
+
+验证通过后，可以直接执行pipeline：
+
+```bash
+# 给执行脚本添加权限
+chmod +x scripts/execute-gpu-pipeline.sh
+
+# 执行GPU pipeline
+./scripts/execute-gpu-pipeline.sh execute
+```
+
+### 🔧 分阶段验证
+
+如果需要单独验证某个组件：
+
+```bash
+# 仅验证基础环境
+./scripts/validate-gpu-pipeline.sh env
+
+# 仅验证GPU访问
+./scripts/validate-gpu-pipeline.sh gpu
+
+# 仅验证存储功能
+./scripts/validate-gpu-pipeline.sh storage
+
+# 清理测试资源
+./scripts/validate-gpu-pipeline.sh cleanup
+```
+
+### 执行脚本使用方法
+
+```bash
+# 给执行脚本添加可执行权限
+chmod +x scripts/execute-gpu-pipeline.sh
+
+# 启动新的 pipeline 执行
+./scripts/execute-gpu-pipeline.sh execute
+
+# 监控特定 pipeline 运行
+./scripts/execute-gpu-pipeline.sh monitor <run-name>
+
+# 查看执行结果
+./scripts/execute-gpu-pipeline.sh results <run-name>
+
+# 列出所有 pipeline 运行记录
+./scripts/execute-gpu-pipeline.sh list
+```
+
+### 预期输出文件
+
+成功执行后，将在 shared-artifacts-workspace PVC 中生成以下文件：
+
+1. **executed_scrna_notebook.ipynb** - 执行后的 Jupyter notebook
+2. **executed_scrna_notebook.html** - HTML 格式的报告
+3. **coverage.xml** - 代码覆盖率报告
+4. **pytest_results.xml** - JUnit 测试结果
+5. **pytest_report.html** - HTML 格式的测试报告
+
+### 🖥️ 访问 Tekton Dashboard
+
+```bash
+# 获取 Dashboard 访问信息
+NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+DASHBOARD_PORT=$(kubectl get svc tekton-dashboard -n tekton-pipelines -o jsonpath='{.spec.ports[0].nodePort}')
+echo "Dashboard URL: http://${NODE_IP}:${DASHBOARD_PORT}"
+```
+
+通过 Dashboard 您可以：
+- 实时监控 pipeline 执行状态
+- 查看每个 task 的详细日志
+- 管理 pipeline 和 task 定义
+- 查看执行历史记录
+
+### ⚠️ 故障排除
+
+如果遇到问题，请按以下顺序检查：
+
+1. **运行验证脚本**: `./scripts/validate-gpu-pipeline.sh validate`
+2. **查看troubleshooting文档**: `docs/zh/troubleshooting.md`
+3. **检查具体错误**: 按文档中的诊断流程操作
+
 ## 🎊 部署完成
 
 恭喜！您已成功完成从 GitHub Actions 到 Tekton GPU 科学计算工作流的完整迁移：
 
 1. ✅ **Tekton 核心组件** - 安装和配置完成
-2. ✅ **Tekton Triggers** - 事件驱动机制就绪
+2. ✅ **Tekton Triggers** - 事件驱动机制就绪  
 3. ✅ **GitHub Webhooks** - 自动触发配置完成
 4. ✅ **GPU Pipeline** - 科学计算工作流部署成功
+5. ✅ **手动执行脚本** - 测试和监控工具就绪
+6. ✅ **验证脚本** - 端到端验证和故障排除工具就绪
 
-现在每次推送代码到 GitHub，都会自动触发 GPU 加速的科学计算流程，生成与原 GitHub Actions 相同的输出文件！ 
+现在每次推送代码到 GitHub，都会自动触发 GPU 加速的科学计算流程，生成与原 GitHub Actions 相同的输出文件！
+
+同时您也可以使用 `scripts/execute-gpu-pipeline.sh` 脚本随时手动执行和测试 pipeline。 

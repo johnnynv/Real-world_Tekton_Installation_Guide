@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: large-dataset-storage
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing
+    app.kubernetes.io/component: large-dataset-storage
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 200Gi  # Large storage for datasets
+  storageClassName: "local-path"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dataset-cache-storage
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing
+    app.kubernetes.io/component: dataset-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi  # Cache storage for reuse
+  storageClassName: "local-path"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: processing-workspace
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-scientific-computing
+    app.kubernetes.io/component: processing-workspace
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 150Gi  # Processing workspace
+  storageClassName: "local-path" 

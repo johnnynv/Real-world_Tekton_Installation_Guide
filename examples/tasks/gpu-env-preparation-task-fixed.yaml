@@ -1,0 +1,154 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gpu-env-preparation-fixed
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-env-preparation-fixed
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    Environment preparation task for GPU scientific computing workflow.
+    Performs git checkout, dependency validation, and environment setup.
+    Fixed version that uses only one workspace to avoid conflicts.
+  params:
+  - name: git-repo-url
+    description: Git repository URL to clone
+    type: string
+  - name: git-revision
+    description: Git revision to checkout (commit hash, branch, or tag)
+    type: string
+    default: "main"
+  - name: workspace-subdir
+    description: Subdirectory within workspace to clone repository
+    type: string
+    default: "source"
+  - name: verbose
+    description: Enable verbose logging
+    type: string
+    default: "true"
+  workspaces:
+  - name: shared-storage
+    description: Shared storage for source code and artifacts
+    mountPath: /workspace/shared
+  results:
+  - name: commit-sha
+    description: SHA of the checked out commit
+  - name: repo-status
+    description: Repository checkout status
+  steps:
+  - name: git-clone
+    image: alpine/git:latest
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    script: |
+      #!/bin/sh
+      set -eu
+      
+      echo "🚀 Starting GPU environment preparation..."
+      echo "📁 Shared workspace: ${WORKSPACE_SHARED_PATH}"
+      echo "🔗 Repository URL: $(params.git-repo-url)"
+      echo "🌿 Revision: $(params.git-revision)"
+      
+      # Create necessary directories
+      mkdir -p "${WORKSPACE_SHARED_PATH}/$(params.workspace-subdir)"
+      mkdir -p "${WORKSPACE_SHARED_PATH}/logs"
+      mkdir -p "${WORKSPACE_SHARED_PATH}/artifacts"
+      mkdir -p "${WORKSPACE_SHARED_PATH}/notebooks"
+      
+      # Clone repository
+      echo "📥 Cloning repository..."
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Remove existing directory if it exists
+      if [ -d "$(params.workspace-subdir)" ]; then
+        echo "🧹 Removing existing directory: $(params.workspace-subdir)"
+        rm -rf "$(params.workspace-subdir)"
+      fi
+      
+      if [ "$(params.verbose)" = "true" ]; then
+        git clone --verbose "$(params.git-repo-url)" "$(params.workspace-subdir)"
+      else
+        git clone "$(params.git-repo-url)" "$(params.workspace-subdir)"
+      fi
+      
+      cd "$(params.workspace-subdir)"
+      
+      # Checkout specific revision
+      if [ "$(params.git-revision)" != "main" ] && [ "$(params.git-revision)" != "master" ]; then
+        echo "🔄 Checking out revision: $(params.git-revision)"
+        git checkout "$(params.git-revision)"
+      fi
+      
+      # Get commit information
+      COMMIT_SHA=$(git rev-parse HEAD)
+      echo "📌 Current commit SHA: ${COMMIT_SHA}"
+      echo -n "${COMMIT_SHA}" > "$(results.commit-sha.path)"
+      
+      # Validate repository structure
+      echo "🔍 Validating repository structure..."
+      if [ -d "notebooks" ]; then
+        echo "✅ notebooks/ directory found"
+        ls -la notebooks/ | head -10
+      else
+        echo "⚠️  notebooks/ directory not found"
+      fi
+      
+      if [ -d "docker-compose" ]; then
+        echo "✅ docker-compose/ directory found"
+        ls -la docker-compose/
+      else
+        echo "⚠️  docker-compose/ directory not found"
+      fi
+      
+      # Copy files to root of shared workspace for other tasks
+      echo "📋 Copying source files to shared workspace root..."
+      cp -r . "${WORKSPACE_SHARED_PATH}/"
+      
+      echo "✅ Environment preparation completed successfully"
+      echo -n "success" > "$(results.repo-status.path)"
+
+  - name: validate-dependencies
+    image: python:3.12-slim
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🔧 Validating Python dependencies..."
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Check if notebook exists
+      NOTEBOOK_PATH="notebooks/01_scRNA_analysis_preprocessing.ipynb"
+      if [ -f "${NOTEBOOK_PATH}" ]; then
+        echo "✅ Found target notebook: ${NOTEBOOK_PATH}"
+        
+        # Extract notebook size for resource planning
+        NOTEBOOK_SIZE=$(du -h "${NOTEBOOK_PATH}" | cut -f1)
+        echo "📊 Notebook size: ${NOTEBOOK_SIZE}"
+        
+        # Simple validation without complex Python parsing
+        echo "ℹ️  GPU dependencies will be validated during notebook execution"
+      else
+        echo "❌ Target notebook not found: ${NOTEBOOK_PATH}"
+        exit 1
+      fi
+      
+      # Check for docker-compose configuration
+      if [ -f "docker-compose/docker-compose-nb-2504.yaml" ]; then
+        echo "✅ Found docker-compose configuration"
+        
+        # Extract image information
+        if command -v grep &> /dev/null; then
+          IMAGE_INFO=$(grep "image:" docker-compose/docker-compose-nb-2504.yaml | head -1)
+          echo "🐳 Container image: ${IMAGE_INFO}"
+        fi
+      else
+        echo "⚠️  docker-compose configuration not found"
+      fi
+      
+      echo "✅ Dependency validation completed" 

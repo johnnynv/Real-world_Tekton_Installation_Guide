@@ -1,0 +1,323 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: large-dataset-download
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: large-dataset-download
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    Robust large dataset download task with retry, resume, validation, and caching.
+    Supports various protocols and implements best practices for reliable downloads.
+  
+  params:
+  - name: dataset-url
+    description: URL of the dataset to download
+    type: string
+  - name: dataset-filename
+    description: Filename for the downloaded dataset
+    type: string
+  - name: expected-size-mb
+    description: Expected file size in MB for validation (optional)
+    type: string
+    default: ""
+  - name: checksum-md5
+    description: Expected MD5 checksum for validation (optional)
+    type: string
+    default: ""
+  - name: max-retries
+    description: Maximum number of download retries
+    type: string
+    default: "3"
+  - name: timeout-minutes
+    description: Download timeout in minutes
+    type: string
+    default: "60"
+  - name: chunk-size-mb
+    description: Download chunk size in MB
+    type: string
+    default: "10"
+  - name: enable-cache
+    description: Enable dataset caching for reuse
+    type: string
+    default: "true"
+  - name: force-redownload
+    description: Force redownload even if file exists
+    type: string
+    default: "false"
+  
+  workspaces:
+  - name: dataset-storage
+    description: Storage workspace for datasets
+    mountPath: /workspace/datasets
+  
+  results:
+  - name: download-status
+    description: Status of the download operation
+  - name: file-path
+    description: Path to the downloaded file
+  - name: file-size-mb
+    description: Actual file size in MB
+  - name: download-time-seconds
+    description: Total download time
+  
+  steps:
+  - name: download-dataset
+    image: alpine:3.18
+    env:
+    - name: DATASET_URL
+      value: $(params.dataset-url)
+    - name: DATASET_FILENAME
+      value: $(params.dataset-filename)
+    - name: EXPECTED_SIZE_MB
+      value: $(params.expected-size-mb)
+    - name: CHECKSUM_MD5
+      value: $(params.checksum-md5)
+    - name: MAX_RETRIES
+      value: $(params.max-retries)
+    - name: TIMEOUT_MINUTES
+      value: $(params.timeout-minutes)
+    - name: CHUNK_SIZE_MB
+      value: $(params.chunk-size-mb)
+    - name: ENABLE_CACHE
+      value: $(params.enable-cache)
+    - name: FORCE_REDOWNLOAD
+      value: $(params.force-redownload)
+    - name: WORKSPACE_PATH
+      value: $(workspaces.dataset-storage.path)
+    script: |
+      #!/bin/sh
+      set -eu
+      
+      echo "🚀 Starting large dataset download task..."
+      echo "📊 Dataset URL: ${DATASET_URL}"
+      echo "📁 Target filename: ${DATASET_FILENAME}"
+      echo "⏱️  Timeout: ${TIMEOUT_MINUTES} minutes"
+      echo "🔄 Max retries: ${MAX_RETRIES}"
+      echo "📦 Chunk size: ${CHUNK_SIZE_MB}MB"
+      
+      # Install required tools
+      echo "🔧 Installing download tools..."
+      apk add --no-cache curl wget file coreutils openssl
+      
+      cd "${WORKSPACE_PATH}"
+      
+      # Create subdirectories
+      mkdir -p datasets cache temp
+      
+      DOWNLOAD_PATH="datasets/${DATASET_FILENAME}"
+      CACHE_PATH="cache/${DATASET_FILENAME}"
+      TEMP_PATH="temp/${DATASET_FILENAME}.tmp"
+      
+      # Record start time
+      START_TIME=$(date +%s)
+      
+      # Function to validate file
+      validate_file() {
+        local file_path="$1"
+        
+        if [ ! -f "${file_path}" ]; then
+          echo "❌ File does not exist: ${file_path}"
+          return 1
+        fi
+        
+        # Check file size
+        FILE_SIZE_BYTES=$(stat -c%s "${file_path}")
+        FILE_SIZE_MB=$((FILE_SIZE_BYTES / 1024 / 1024))
+        echo "📊 File size: ${FILE_SIZE_MB}MB (${FILE_SIZE_BYTES} bytes)"
+        
+        if [ -n "${EXPECTED_SIZE_MB}" ] && [ "${EXPECTED_SIZE_MB}" != "0" ]; then
+          EXPECTED_BYTES=$((EXPECTED_SIZE_MB * 1024 * 1024))
+          SIZE_DIFF=$((FILE_SIZE_BYTES - EXPECTED_BYTES))
+          SIZE_DIFF_ABS=${SIZE_DIFF#-}  # Get absolute value
+          
+          # Allow 1% tolerance
+          TOLERANCE=$((EXPECTED_BYTES / 100))
+          
+          if [ "${SIZE_DIFF_ABS}" -gt "${TOLERANCE}" ]; then
+            echo "❌ File size mismatch. Expected: ${EXPECTED_SIZE_MB}MB, Got: ${FILE_SIZE_MB}MB"
+            return 1
+          else
+            echo "✅ File size validation passed"
+          fi
+        fi
+        
+        # Check MD5 checksum if provided
+        if [ -n "${CHECKSUM_MD5}" ]; then
+          echo "🔍 Verifying MD5 checksum..."
+          ACTUAL_MD5=$(md5sum "${file_path}" | cut -d' ' -f1)
+          if [ "${ACTUAL_MD5}" = "${CHECKSUM_MD5}" ]; then
+            echo "✅ MD5 checksum validation passed"
+          else
+            echo "❌ MD5 checksum mismatch. Expected: ${CHECKSUM_MD5}, Got: ${ACTUAL_MD5}"
+            return 1
+          fi
+        fi
+        
+        return 0
+      }
+      
+      # Check if cached file exists and is valid
+      if [ "${ENABLE_CACHE}" = "true" ] && [ "${FORCE_REDOWNLOAD}" != "true" ]; then
+        echo "🔍 Checking for cached file..."
+        if [ -f "${CACHE_PATH}" ]; then
+          echo "📋 Found cached file, validating..."
+          if validate_file "${CACHE_PATH}"; then
+            echo "✅ Using cached file"
+            cp "${CACHE_PATH}" "${DOWNLOAD_PATH}"
+            
+            # Record results
+            FILE_SIZE_BYTES=$(stat -c%s "${DOWNLOAD_PATH}")
+            FILE_SIZE_MB=$((FILE_SIZE_BYTES / 1024 / 1024))
+            END_TIME=$(date +%s)
+            TOTAL_TIME=$((END_TIME - START_TIME))
+            
+            echo "cached" > "$(results.download-status.path)"
+            echo "${DOWNLOAD_PATH}" > "$(results.file-path.path)"
+            echo "${FILE_SIZE_MB}" > "$(results.file-size-mb.path)"
+            echo "${TOTAL_TIME}" > "$(results.download-time-seconds.path)"
+            
+            echo "🎉 Dataset ready from cache in ${TOTAL_TIME} seconds"
+            exit 0
+          else
+            echo "⚠️  Cached file validation failed, will redownload"
+            rm -f "${CACHE_PATH}"
+          fi
+        else
+          echo "ℹ️  No cached file found"
+        fi
+      fi
+      
+      # Check if target file already exists and is valid
+      if [ "${FORCE_REDOWNLOAD}" != "true" ] && [ -f "${DOWNLOAD_PATH}" ]; then
+        echo "🔍 Checking existing target file..."
+        if validate_file "${DOWNLOAD_PATH}"; then
+          echo "✅ Target file already exists and is valid"
+          
+          # Copy to cache if caching is enabled
+          if [ "${ENABLE_CACHE}" = "true" ]; then
+            cp "${DOWNLOAD_PATH}" "${CACHE_PATH}"
+            echo "📋 File cached for future use"
+          fi
+          
+          # Record results
+          FILE_SIZE_BYTES=$(stat -c%s "${DOWNLOAD_PATH}")
+          FILE_SIZE_MB=$((FILE_SIZE_BYTES / 1024 / 1024))
+          END_TIME=$(date +%s)
+          TOTAL_TIME=$((END_TIME - START_TIME))
+          
+          echo "existing" > "$(results.download-status.path)"
+          echo "${DOWNLOAD_PATH}" > "$(results.file-path.path)"
+          echo "${FILE_SIZE_MB}" > "$(results.file-size-mb.path)"
+          echo "${TOTAL_TIME}" > "$(results.download-time-seconds.path)"
+          
+          echo "🎉 Dataset ready (existing) in ${TOTAL_TIME} seconds"
+          exit 0
+        else
+          echo "⚠️  Existing file validation failed, will redownload"
+          rm -f "${DOWNLOAD_PATH}"
+        fi
+      fi
+      
+      # Download with retry logic
+      echo "📥 Starting download..."
+      RETRY=0
+      SUCCESS=false
+      
+      while [ "${RETRY}" -lt "${MAX_RETRIES}" ] && [ "${SUCCESS}" = "false" ]; do
+        RETRY=$((RETRY + 1))
+        echo "🔄 Download attempt ${RETRY}/${MAX_RETRIES}..."
+        
+        # Remove partial file
+        rm -f "${TEMP_PATH}"
+        
+        # Download with curl (supports resume and better error handling)
+        DOWNLOAD_START=$(date +%s)
+        
+        # Use curl with comprehensive options
+        if curl \
+          --location \
+          --fail \
+          --retry 2 \
+          --retry-delay 5 \
+          --retry-max-time $((TIMEOUT_MINUTES * 60)) \
+          --connect-timeout 30 \
+          --max-time $((TIMEOUT_MINUTES * 60)) \
+          --progress-bar \
+          --output "${TEMP_PATH}" \
+          "${DATASET_URL}"; then
+          
+          DOWNLOAD_END=$(date +%s)
+          DOWNLOAD_TIME=$((DOWNLOAD_END - DOWNLOAD_START))
+          echo "✅ Download completed in ${DOWNLOAD_TIME} seconds"
+          
+          # Validate downloaded file
+          if validate_file "${TEMP_PATH}"; then
+            echo "✅ Downloaded file validation passed"
+            mv "${TEMP_PATH}" "${DOWNLOAD_PATH}"
+            
+            # Copy to cache if caching is enabled
+            if [ "${ENABLE_CACHE}" = "true" ]; then
+              cp "${DOWNLOAD_PATH}" "${CACHE_PATH}"
+              echo "📋 File cached for future use"
+            fi
+            
+            SUCCESS=true
+          else
+            echo "❌ Downloaded file validation failed"
+            rm -f "${TEMP_PATH}"
+          fi
+        else
+          CURL_EXIT_CODE=$?
+          echo "❌ Download failed with exit code: ${CURL_EXIT_CODE}"
+          
+          # Clean up partial file
+          rm -f "${TEMP_PATH}"
+          
+          if [ "${RETRY}" -lt "${MAX_RETRIES}" ]; then
+            SLEEP_TIME=$((RETRY * 10))
+            echo "⏳ Waiting ${SLEEP_TIME} seconds before retry..."
+            sleep "${SLEEP_TIME}"
+          fi
+        fi
+      done
+      
+      # Check final success
+      if [ "${SUCCESS}" = "true" ]; then
+        # Record results
+        FILE_SIZE_BYTES=$(stat -c%s "${DOWNLOAD_PATH}")
+        FILE_SIZE_MB=$((FILE_SIZE_BYTES / 1024 / 1024))
+        END_TIME=$(date +%s)
+        TOTAL_TIME=$((END_TIME - START_TIME))
+        
+        echo "downloaded" > "$(results.download-status.path)"
+        echo "${DOWNLOAD_PATH}" > "$(results.file-path.path)"
+        echo "${FILE_SIZE_MB}" > "$(results.file-size-mb.path)"
+        echo "${TOTAL_TIME}" > "$(results.download-time-seconds.path)"
+        
+        echo ""
+        echo "🎉 Dataset download completed successfully!"
+        echo "📁 File path: ${DOWNLOAD_PATH}"
+        echo "📊 File size: ${FILE_SIZE_MB}MB"
+        echo "⏱️  Total time: ${TOTAL_TIME} seconds"
+        echo "🔄 Attempts used: ${RETRY}/${MAX_RETRIES}"
+        
+        # Show disk usage
+        echo ""
+        echo "💾 Disk usage in workspace:"
+        du -h . | sort -hr | head -10
+        
+      else
+        echo "❌ Download failed after ${MAX_RETRIES} attempts"
+        echo "failed" > "$(results.download-status.path)"
+        echo "" > "$(results.file-path.path)"
+        echo "0" > "$(results.file-size-mb.path)"
+        
+        END_TIME=$(date +%s)
+        TOTAL_TIME=$((END_TIME - START_TIME))
+        echo "${TOTAL_TIME}" > "$(results.download-time-seconds.path)"
+        
+        exit 1
+      fi 

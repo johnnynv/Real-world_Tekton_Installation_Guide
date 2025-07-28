@@ -19,7 +19,7 @@ This guide provides detailed instructions for installing Tekton core components 
 ### Check Cluster Status
 ```bash
 # Check Kubernetes version
-kubectl version --short
+kubectl version
 
 # Check cluster node status
 kubectl get nodes
@@ -77,35 +77,44 @@ kubectl get pods -n tekton-pipelines | grep dashboard
 kubectl get svc -n tekton-pipelines | grep dashboard
 ```
 
-## 🌐 Step 3: Configure Access Methods
+## 🌐 Step 3: Configure Production-Grade Access (HTTPS + Authentication)
 
-### Method 1: Port Forwarding (Development Environment)
+### Production Security Configuration
 ```bash
-# Start port forwarding
-kubectl port-forward -n tekton-pipelines svc/tekton-dashboard 9097:9097
+# Install required tools
+sudo apt-get update && sudo apt-get install -y apache2-utils openssl
 
-# Access in browser
-# http://localhost:9097
+# Grant execution permission to configuration script
+chmod +x scripts/install/02-configure-tekton-dashboard.sh
+
+# Execute production-grade configuration (auto-generate certificate and password)
+./scripts/install/02-configure-tekton-dashboard.sh
 ```
 
-### Method 2: NodePort Service (Recommended)
+### Custom Configuration Parameters
 ```bash
-# Create NodePort service
-kubectl patch svc tekton-dashboard -n tekton-pipelines -p '{"spec":{"type":"NodePort"}}'
-
-# Get access port
-kubectl get svc tekton-dashboard -n tekton-pipelines
+# Use custom domain and password
+./scripts/install/02-configure-tekton-dashboard.sh \
+  --host tekton.YOUR_IP.nip.io \
+  --admin-user admin \
+  --admin-password your-secure-password \
+  --ingress-class nginx
 ```
 
-Access Dashboard:
+### Configure Domain Access
+Use nip.io free domain service, no need to configure DNS or hosts file:
 ```bash
-# Get node IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+# Use actual external IP address to configure domain
+EXTERNAL_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "Dashboard URL: https://tekton.${EXTERNAL_IP}.nip.io"
+```
 
-# Get port
-NODE_PORT=$(kubectl get svc tekton-dashboard -n tekton-pipelines -o jsonpath='{.spec.ports[0].nodePort}')
-
-echo "Dashboard access URL: http://${NODE_IP}:${NODE_PORT}"
+### Direct Access
+```bash
+# Example: Use currently configured domain
+# https://tekton.10.117.8.154.nip.io
+# Username: admin
+# Password: (script-generated password)
 ```
 
 ## ✅ Verify Complete Installation

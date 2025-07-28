@@ -1,0 +1,109 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tekton-dashboard-auth
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-dashboard
+    app.kubernetes.io/component: dashboard-auth
+type: Opaque
+data:
+  auth: YWRtaW46JGFwcjEka25sTlJvdlQkY2FTb1QyVWI3bDUxTVB4YUk2STRTLw==
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tekton-dashboard-tls
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-dashboard
+    app.kubernetes.io/component: dashboard-tls
+type: kubernetes.io/tls
+data:
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUVEekNDQXZlZ0F3SUJBZ0lVTCtQTmVPYVFIdnhtZndveDBYdjJCY0ZPK1JBd0RRWUpLb1pJaHZjTkFRRUwKQlFBd2dZUXhDekFKQmdOVkJBWVRBbFZUTVJNd0VRWURWUVFJREFwUWNtOWtkV04wYVc5dU1STXdFUVlEVlFRSApEQXBRY205a2RXTjBhVzl1TVE4d0RRWURWUVFLREFaVVpXdDBiMjR4RlRBVEJnTlZCQXNNREVkUVZTQlFhWEJsCmJHbHVaVEVqTUNFR0ExVUVBd3dhZEdWcmRHOXVMakV3TGpFeE55NDRMakUxTkM1dWFYQXVhVzh3SGhjTk1qVXcKTnpJNE1EUTBNak0zV2hjTk1qWXdOekk0TURRME1qTTNXakNCaERFTE1Ba0dBMVVFQmhNQ1ZWTXhFekFSQmdOVgpCQWdNQ2xCeWIyUjFZM1JwYjI0eEV6QVJCZ05WQkFjTUNsQnliMlIxWTNScGIyNHhEekFOQmdOVkJBb01CbFJsCmEzUnZiakVWTUJNR0ExVUVDd3dNUjFCVklGQnBjR1ZzYVc1bE1TTXdJUVlEVlFRRERCcDBaV3QwYjI0dU1UQXUKTVRFM0xqZ3VNVFUwTG01cGNDNXBiekNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQgpBS3VnV0lyMStxOUh1aWUzOWZxSC9majlRNHQ4YW0ya3ozZm1IZWdlWW93a0xPaGpYRVpIS1lCWUI2QTJ2cVBaCmVzajR0YzhFbnhNU0ZPbGt2OXJGVjUyTnM5NUdidlVnU29odkVJajZjdGhYRm45U2RKczB6OEZRcjhVRk02TDcKYklmV1JTTWNTZHl2cHdubnBDdERsSGRIMWtwSUJaZTdMUzMwWGJuU2ZxRGRHNER6SjNaY2JUam11YWxaaU8xcAowWm9wTWl4eUtvTkJKQktvdVVYME4vV2xrY1RiVUpFVEtyK1drYUZPQk9KdW1INzl5KzZmT21YSloxRjFIWjA1ClQ2RVdQWk5iQlNoMWpnTnh4b2l3NC8rQ0l4YWxtRlhIemY5MXkrZzBSSXRDbVNpdXJ2NW5VVndtMDZBd2QrSEwKemp5L2M2U1o4SE53Ky9WZUdYZzRmaUVDQXdFQUFhTjNNSFV3Q1FZRFZSMFRCQUl3QURBTEJnTlZIUThFQkFNQwpCZUF3UEFZRFZSMFJCRFV3TTRJYWRHVnJkRzl1TGpFd0xqRXhOeTQ0TGpFMU5DNXVhWEF1YVcrQ0ZTb3VNVEF1Ck1URTNMamd1TVRVMExtNXBjQzVwYnpBZEJnTlZIUTRFRmdRVTF3YzFwZkJGNmZnOEtSMEVrck0weWxzMnRiUXcKRFFZSktvWklodmNOQVFFTEJRQURnZ0VCQUlOSFY3cHBldVFZWkpJMmE0TGpMTHBjUkwvOUZNOXNzamczUzVxWAorYWRDNkFEZUtKQ0lmZnJoaUtURVkvZGVBb3AzaEtNMzh1dDZCZG5wTDNWbndFYUZ3aFVRUHFWWmV1S3NJT0k0Ci8rRFQ0cFFjQWlzemJnOXZtcmF2QUJ4MGlHY2R4TW53RGpPNUhqYXFSQTNRZHdIS3hGZGFtNU40QzYxVDVOUkIKOHd4eHp0Q3FrdnZtYk1yNnozTENNMW5meUZJZkErNE9sYWxVMW9LRVdIUmFXMS9tR0FCZHBhSnhtRlZodE85cQpDMTNqOHM1WVIwd0N6RXNhWDlRMzlKSm5PODlLWm00d2xKY21OaGMrZnVkRVBmMFFIY3kzb3ZyOW5PeHU0VUYwCk1GOTBqRHhKT0R6VXQxWno1dEpHN25nWjZlVXQwamN4K0p4cHc4NTI5MFc3V3hFPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2UUlCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktjd2dnU2pBZ0VBQW9JQkFRQ3JvRmlLOWZxdlI3b24KdC9YNmgvMzQvVU9MZkdwdHBNOTM1aDNvSG1LTUpDem9ZMXhHUnltQVdBZWdOcjZqMlhySStMWFBCSjhURWhUcApaTC9heFZlZGpiUGVSbTcxSUVxSWJ4Q0krbkxZVnhaL1VuU2JOTS9CVUsvRkJUT2krMnlIMWtVakhFbmNyNmNKCjU2UXJRNVIzUjlaS1NBV1h1eTB0OUYyNTBuNmczUnVBOHlkMlhHMDQ1cm1wV1lqdGFkR2FLVElzY2lxRFFTUVMKcUxsRjlEZjFwWkhFMjFDUkV5cS9scEdoVGdUaWJwaCsvY3Z1bnpwbHlXZFJkUjJkT1UraEZqMlRXd1VvZFk0RApjY2FJc09QL2dpTVdwWmhWeDgzL2Rjdm9ORVNMUXBrb3JxNytaMUZjSnRPZ01IZmh5ODQ4djNPa21mQnpjUHYxClhobDRPSDRoQWdNQkFBRUNnZ0VBQThFT2E5c0FxcS8wc21IbWs4ek1kRFpKcGR1M2VzMzA2cnNnc1VDckZCWGQKWmZrRVBpZllKN3h6d2VNaUlEcDh5djNncERaWHdlVWYvclFNMWU1VFUwMWxNN3phMnpYNnkyT1IwbU1MdFZYQQpLQ09NRElPZVpxekNWYkh2NDA3ZVA3TEY1VW9VVFZuRUZZWXkrelFEM2RFcm94VGVPYmo3YlFOMGtRYWloSFQ1CjhLRE1JTHNNQXg1VDhFNGgwNHhvZDdQbGtRR2M3WlFyb094Zkx6TndYRlc2SjhQUW9PL0Z6V0FrVytrYkRZVlMKOW8rWFFHRWVTaHl2RTlCYTVLSEQrc2lHanM3ZXB0VFZBU1owYTFmeE5KeUwxMDRRbkJQSkp1QXVzOGdDR2VvVwpadFovcCtRUXdLVWQwY3VaSTJOcVVjWmRReWFKcndSZDdDNXlWQ3FRTFFLQmdRRG1yaU11bDZxSzhheU8zTjBkCjdyZ3UzUlg3UUxmZkk4ZkhLL3IycVdMeFN2RS9yM2prMVNPODdrT3QwWC9qVkFZSi9nWU1wZnZYVksvcmN6TksKMUNlNGFZQTg3THJvdFNob3ovWWtXN2NJRVZPUGRFYTBWNGk0Wi96UjBaZGNjYzQxa2x6c25pbUpOSXkxbERZTgpnaUxrWEhKZlVUSXpwdDhoTTdzNUVQdVFCd0tCZ1FDK2R0dnFZQzU2NG1aUWd3ZHMrOXdWODFCaTVwMURTVlE2CjlGa1lTck1uZ1RXMzhwVlBidW1obUZuZWp3TVB6REd5QjJjMnFSWHFMVW1GSVZ1WFNlckRNZ3A4L3RDL21Db1gKbFdoc2hreEh5a2lKTEdWZC9FS1pSOURRdXNjclkzZEpoekREbHNIcGlSem1XSnh1S0oreUtJVDN2aFduVWI5aQo4alZoeDM2bWx3S0JnUUNweXoyTU93akY4dk9QeUpSZFJ1eDlXakNtMnRFOHhzcHpHVFZGd0JKYkIwMmlFZGZMCm4vTUpTdHU0SW4rZTVhYjRUZWxJQUJqcU82U3Rpd01UTGl2NmVuVnc0dE1GSE9zY2t3NWJYc0xQaG1sYUt6MHIKMjA2QVpkSmE0b29sK29MTlBlbDJKVWp2ZkNXaU5mQy9hcTJpSjBYc1VRakJxaStNOGRYNlFEemFtd0tCZ0ZUMApUME5MZzIvc2JCYWRXMEtSVkttMXpiVlBoL1hyVDFhOGhzRC9FTW9lS0FmVWZDVGlJL09nTVBYRWRHa25lME1kCmFqeEhUeThVNUNZdHF0emdhNGFGVzRoRllIY1ZPREVzdzFjazBBRjFpTVVtdUZBanBORVo1MW95OVlPMDZoQXgKN041UThFMXFpeWx6Zk5MbDY5VmJuWE9qcGFUc0lhSFF4MTdGelFnaEFvR0FjUzdpZmhxa3ZxSGNBV3hhekRNWQpBamdISFN0ZFJMRTFuWXdkYUhUMmxLaWJoQmc3SzRvSnBWZmRDcGwvMjRrZXd0NTFabWhYcWFtRE00UmFwOVY0ClpUZDFsWjNsTGNCdkdiazRUWGk0MVdhUXUvcGpHNi91YlpEUFFBRlNIcUY4bzRScGx2RzlHUE05YUdXK213YUIKSnZPZjJXS1ViMW9UYVRlaUV5MGJBODQ9Ci0tLS0tRU5EIFBSSVZBVEUgS0VZLS0tLS0K
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tekton-dashboard
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-dashboard
+    app.kubernetes.io/component: dashboard-ingress
+  annotations:
+    # Production security settings
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: tekton-dashboard-auth
+    nginx.ingress.kubernetes.io/auth-realm: "Tekton Dashboard - Production Access"
+    
+    # Production security settings (without snippets)
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "1m"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "8k"
+    
+    # Rate limiting for production
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    nginx.ingress.kubernetes.io/rate-limit-status-code: "429"
+    
+    # Connection and timeout settings
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "10"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-next-upstream: "error timeout http_502 http_503 http_504"
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - tekton.10.117.8.154.nip.io
+    secretName: tekton-dashboard-tls
+  rules:
+  - host: tekton.10.117.8.154.nip.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: tekton-dashboard
+            port:
+              number: 9097
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: tekton-dashboard-netpol
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: tekton-dashboard
+    app.kubernetes.io/component: dashboard-security
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: dashboard
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    ports:
+    - protocol: TCP
+      port: 9097
+  egress:
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP  
+      port: 6443
+  - to: []
+    ports:
+    - protocol: UDP
+      port: 53

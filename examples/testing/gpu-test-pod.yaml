@@ -1,0 +1,42 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-test-pod
+  namespace: tekton-pipelines
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    accelerator: nvidia-tesla-gpu
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - name: gpu-test
+    image: nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12
+    command: ["/bin/bash"]
+    args:
+    - -c
+    - |
+      echo "🔍 Checking GPU access in container..."
+      echo "📁 Checking /dev/nvidia* devices:"
+      ls -la /dev/nvidia* || echo "❌ No nvidia devices found"
+      echo ""
+      echo "🔧 Testing nvidia-smi:"
+      nvidia-smi || echo "❌ nvidia-smi failed"
+      echo ""
+      echo "🐍 Testing Python CUDA access:"
+      python3 -c "import cupy as cp; print('✅ CuPy version:', cp.__version__); print('✅ CUDA devices:', cp.cuda.runtime.getDeviceCount())" || echo "❌ Python CUDA test failed"
+      echo ""
+      echo "💤 Sleeping for 300 seconds for debugging..."
+      sleep 300
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+      requests:
+        nvidia.com/gpu: 1
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility" 

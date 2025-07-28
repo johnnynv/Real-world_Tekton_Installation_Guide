@@ -1,0 +1,81 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-scrna-analysis-manual-run
+  namespace: tekton-pipelines
+  labels:
+    app: gpu-scientific-computing
+    trigger: manual
+    gpu-pipeline: "true"
+    test-type: "manual-execution"
+  annotations:
+    tekton.dev/pipeline-type: "gpu-scientific-computing"
+    tekton.dev/test-notebook: "01_scRNA_analysis_preprocessing.ipynb"
+    tekton.dev/execution-mode: "manual"
+spec:
+  pipelineRef:
+    name: gpu-scientific-computing-pipeline
+  
+  # Pipeline parameters
+  params:
+  - name: git-repo-url
+    value: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+  - name: git-revision
+    value: "main"
+  - name: notebook-path
+    value: "notebooks/01_scRNA_analysis_preprocessing.ipynb"
+  - name: output-notebook-name
+    value: "executed_scrna_notebook.ipynb"
+  - name: output-html-name
+    value: "executed_scrna_notebook.html"
+  - name: gpu-count
+    value: "1"
+  - name: gpu-memory-limit
+    value: "32Gi"
+  - name: gpu-cpu-limit
+    value: "8"
+  - name: container-image
+    value: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  - name: test-repo-url
+    value: "https://github.com/NVIDIA-AI-Blueprints/blueprint-github-test.git"
+  - name: pytest-markers
+    value: "single_cell"
+  - name: verbose-logging
+    value: "true"
+  - name: continue-on-test-failure
+    value: "true"
+  
+  # Workspaces using existing PVCs
+  workspaces:
+  - name: source-code-workspace
+    persistentVolumeClaim:
+      claimName: source-code-workspace
+  
+  - name: shared-artifacts-workspace
+    persistentVolumeClaim:
+      claimName: shared-artifacts-workspace
+  
+  - name: gpu-cache-workspace
+    persistentVolumeClaim:
+      claimName: gpu-cache-workspace
+  
+  - name: test-execution-workspace
+    persistentVolumeClaim:
+      claimName: test-execution-workspace
+  
+  # Pipeline run specifications
+  timeouts:
+    pipeline: "3h"  # Allow up to 3 hours for complete execution
+  
+  # Task-level pod template for GPU scheduling
+  taskRunTemplate:
+    podTemplate:
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      securityContext:
+        fsGroup: 0
+        runAsUser: 0 

@@ -1,0 +1,188 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-papermill-notebook-test
+  namespace: tekton-pipelines
+  labels:
+    test-type: "gpu-papermill-notebook"
+spec:
+  pipelineSpec:
+    workspaces:
+    - name: shared-artifacts-workspace
+    tasks:
+    - name: gpu-papermill-notebook
+      workspaces:
+      - name: shared-storage
+        workspace: shared-artifacts-workspace
+      taskSpec:
+        workspaces:
+        - name: shared-storage
+        steps:
+        - name: create-test-notebook
+          image: alpine:latest
+          script: |
+            #!/bin/sh
+            set -eu
+            
+            echo "📝 Creating test notebook..."
+            cd $(workspaces.shared-storage.path)
+            mkdir -p notebooks artifacts
+            
+            # Create a minimal test notebook that mimics the RMM initialization
+            cat > notebooks/test_rmm_notebook.ipynb << 'EOF'
+            {
+             "cells": [
+              {
+               "cell_type": "code",
+               "execution_count": null,
+               "metadata": {},
+               "outputs": [],
+               "source": [
+                "import scanpy as sc\n",
+                "import cupy as cp\n",
+                "\n",
+                "import time\n",
+                "import rapids_singlecell as rsc\n",
+                "\n",
+                "import warnings\n",
+                "\n",
+                "warnings.filterwarnings(\"ignore\")"
+               ]
+              },
+              {
+               "cell_type": "code", 
+               "execution_count": null,
+               "metadata": {},
+               "outputs": [],
+               "source": [
+                "import rmm\n",
+                "from rmm.allocators.cupy import rmm_cupy_allocator\n",
+                "\n",
+                "print(f'🔧 Testing RMM initialization...')\n",
+                "print(f'RMM version: {rmm.__version__}')\n",
+                "\n",
+                "try:\n",
+                "    rmm.reinitialize(\n",
+                "        managed_memory=False,  # Allows oversubscription\n",
+                "        pool_allocator=False,  # default is False\n",
+                "        devices=0,  # GPU device IDs to register. By default registers only GPU 0.\n",
+                "    )\n",
+                "    cp.cuda.set_allocator(rmm_cupy_allocator)\n",
+                "    print('✅ RMM initialization successful')\n",
+                "except Exception as e:\n",
+                "    print(f'❌ RMM initialization failed: {e}')\n",
+                "    import traceback\n",
+                "    traceback.print_exc()\n",
+                "    raise"
+               ]
+              },
+              {
+               "cell_type": "code",
+               "execution_count": null,
+               "metadata": {},
+               "outputs": [],
+               "source": [
+                "# Test basic GPU operations\n",
+                "print('🧪 Testing basic GPU operations...')\n",
+                "a = cp.array([1, 2, 3, 4, 5])\n",
+                "b = cp.array([5, 4, 3, 2, 1])\n",
+                "c = a + b\n",
+                "print(f'GPU array addition result: {c}')\n",
+                "print('✅ Basic GPU operations successful')"
+               ]
+              }
+             ],
+             "metadata": {
+              "kernelspec": {
+               "display_name": "Python 3",
+               "language": "python", 
+               "name": "python3"
+              },
+              "language_info": {
+               "name": "python",
+               "version": "3.12.9"
+              }
+             },
+             "nbformat": 4,
+             "nbformat_minor": 4
+            }
+            EOF
+            
+            echo "✅ Test notebook created"
+            
+        - name: execute-with-papermill
+          image: nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12
+          computeResources:
+            requests:
+              nvidia.com/gpu: "1"
+            limits:
+              nvidia.com/gpu: "1"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: false
+            runAsUser: 0
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+          - name: NVIDIA_VISIBLE_DEVICES
+            value: "all"
+          - name: NVIDIA_DRIVER_CAPABILITIES
+            value: "compute,utility"
+          script: |
+            #!/bin/bash
+            set -eu
+            
+            echo "🚀 Starting Papermill execution test..."
+            cd $(workspaces.shared-storage.path)
+            
+            echo "🔍 Pre-execution GPU check:"
+            nvidia-smi --query-gpu=name,memory.total,memory.used --format=csv,noheader,nounits
+            
+            echo ""
+            echo "📦 Installing papermill..."
+            pip install --quiet papermill ipykernel
+            
+            echo ""
+            echo "🔥 Executing test notebook with papermill..."
+            echo "📝 Command: papermill notebooks/test_rmm_notebook.ipynb artifacts/test_output.ipynb"
+            
+            # Execute with papermill using same parameters as main task
+            papermill notebooks/test_rmm_notebook.ipynb artifacts/test_output.ipynb \
+              --log-output \
+              --log-level DEBUG \
+              --progress-bar \
+              --report-mode \
+              --kernel python3 2>&1 | tee artifacts/papermill_test.log
+            
+            PAPERMILL_EXIT_CODE=$?
+            
+            echo ""
+            echo "📊 Post-execution GPU check:"
+            nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader,nounits
+            
+            if [ $PAPERMILL_EXIT_CODE -eq 0 ]; then
+              echo "✅ Papermill execution successful!"
+            else
+              echo "❌ Papermill execution failed with exit code: $PAPERMILL_EXIT_CODE"
+              echo "🔍 Last 30 lines of papermill log:"
+              tail -30 artifacts/papermill_test.log
+              exit $PAPERMILL_EXIT_CODE
+            fi
+            
+            echo ""
+            echo "📄 Checking output notebook..."
+            if [ -f "artifacts/test_output.ipynb" ]; then
+              echo "✅ Output notebook created successfully"
+              echo "📊 Output notebook size: $(du -h artifacts/test_output.ipynb | cut -f1)"
+            else
+              echo "❌ Output notebook not found"
+              exit 1
+            fi
+            
+            echo "🎉 Papermill notebook test completed successfully!"
+  workspaces:
+  - name: shared-artifacts-workspace
+    persistentVolumeClaim:
+      claimName: shared-artifacts-workspace 

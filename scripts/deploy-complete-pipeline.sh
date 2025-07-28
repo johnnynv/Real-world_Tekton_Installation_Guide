@@ -116,6 +116,19 @@ deploy_rbac() {
     log_info "Secret saved to webhook-secret.txt"
 }
 
+# Deploy Workspaces
+deploy_workspaces() {
+    log_info "Deploying PVC Workspaces..."
+    
+    kubectl apply -f examples/workspaces/gpu-pipeline-workspaces.yaml
+    
+    # Wait for PVCs to be bound (for some storage classes)
+    log_info "Waiting for PVCs to be ready..."
+    sleep 10
+    
+    log_success "PVC Workspaces deployment completed"
+}
+
 # Deploy GPU Tasks
 deploy_gpu_tasks() {
     log_info "Deploying GPU Tasks..."
@@ -212,6 +225,7 @@ main() {
     install_tekton_dashboard
     install_tekton_triggers
     deploy_rbac
+    deploy_workspaces
     deploy_gpu_tasks
     deploy_gpu_pipeline
     deploy_triggers

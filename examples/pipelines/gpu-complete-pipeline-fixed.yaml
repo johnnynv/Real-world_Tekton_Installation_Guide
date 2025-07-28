@@ -1,0 +1,154 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-scrna-complete-fixed
+  namespace: tekton-pipelines
+  labels:
+    app: gpu-scientific-computing
+    trigger: manual
+    gpu-pipeline: "true"
+    test-type: "fixed-complete-pipeline"
+  annotations:
+    tekton.dev/pipeline-type: "gpu-scientific-computing"
+    tekton.dev/test-notebook: "01_scRNA_analysis_preprocessing.ipynb"
+    tekton.dev/execution-mode: "complete-fixed"
+spec:
+  pipelineSpec:
+    description: |
+      Complete GPU-accelerated scientific computing pipeline for processing 01_scRNA_analysis_preprocessing.ipynb.
+      This is the FIXED version that uses only one workspace per task to avoid conflicts.
+      
+      Steps:
+      1. Environment preparation and code checkout (FIXED)
+      2. GPU-accelerated notebook execution with Papermill (FIXED)
+      3. Notebook to HTML conversion using Jupyter nbconvert
+      4. Automated testing with PyTest framework (FIXED)
+    
+    params:
+    - name: git-repo-url
+      description: Git repository URL containing the notebook to execute
+      type: string
+      default: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+    - name: git-revision
+      description: Git revision to checkout
+      type: string
+      default: "main"
+    - name: notebook-path
+      description: Path to the notebook file
+      type: string
+      default: "notebooks/01_scRNA_analysis_preprocessing.ipynb"
+    - name: output-notebook-name
+      description: Name for the executed notebook output
+      type: string
+      default: "executed_scrna_notebook.ipynb"
+    - name: output-html-name
+      description: Name for the HTML conversion output
+      type: string
+      default: "executed_scrna_notebook.html"
+    - name: container-image
+      description: GPU-enabled container image for notebook execution
+      type: string
+      default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+    - name: test-repo-url
+      description: URL of the test framework repository
+      type: string
+      default: "https://github.com/NVIDIA-AI-Blueprints/blueprint-github-test.git"
+    - name: pytest-markers
+      description: PyTest markers to run
+      type: string
+      default: "single_cell"
+    
+    workspaces:
+    - name: shared-artifacts-workspace
+      description: Shared workspace for all tasks - source code, artifacts, cache, and test repository
+    
+    tasks:
+    # Task 1: Environment preparation and code checkout (FIXED VERSION)
+    - name: prepare-environment
+      taskRef:
+        name: gpu-env-preparation-fixed
+      params:
+      - name: git-repo-url
+        value: $(params.git-repo-url)
+      - name: git-revision
+        value: $(params.git-revision)
+      - name: verbose
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: shared-artifacts-workspace
+    
+    # Task 2: GPU-accelerated notebook execution (FIXED VERSION)
+    - name: execute-notebook-gpu
+      taskRef:
+        name: gpu-papermill-execution
+      runAfter: ["prepare-environment"]
+      params:
+      - name: notebook-path
+        value: $(params.notebook-path)
+      - name: output-notebook-name
+        value: $(params.output-notebook-name)
+      - name: container-image
+        value: $(params.container-image)
+      - name: gpu-count
+        value: "1"
+      - name: memory-limit
+        value: "32Gi"
+      - name: cpu-limit
+        value: "8"
+      workspaces:
+      - name: shared-storage
+        workspace: shared-artifacts-workspace
+    
+    # Task 3: Convert notebook to HTML
+    - name: convert-to-html
+      taskRef:
+        name: jupyter-nbconvert
+      runAfter: ["execute-notebook-gpu"]
+      params:
+      - name: input-notebook-name
+        value: $(params.output-notebook-name)
+      - name: output-html-name
+        value: $(params.output-html-name)
+      - name: embed-images
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: shared-artifacts-workspace
+    
+    # Task 4: Run PyTest tests (FIXED VERSION)
+    - name: run-tests
+      taskRef:
+        name: pytest-execution
+      runAfter: ["convert-to-html"]
+      params:
+      - name: test-repo-url
+        value: $(params.test-repo-url)
+      - name: html-input-file
+        value: $(params.output-html-name)
+      - name: pytest-markers
+        value: $(params.pytest-markers)
+      workspaces:
+      - name: shared-storage
+        workspace: shared-artifacts-workspace
+  
+  workspaces:
+  - name: shared-artifacts-workspace
+    persistentVolumeClaim:
+      claimName: shared-artifacts-workspace
+  
+  timeouts:
+    pipeline: "3h"  # Allow up to 3 hours for complete execution
+  
+  # Task-level pod template for GPU scheduling
+  taskRunTemplate:
+    podTemplate:
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+      securityContext:
+        fsGroup: 0
+        runAsUser: 0 

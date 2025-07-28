@@ -1,0 +1,32 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: debug-workspace-test
+  namespace: tekton-pipelines
+spec:
+  pipelineSpec:
+    workspaces:
+    - name: test-workspace
+    tasks:
+    - name: simple-test
+      workspaces:
+      - name: shared
+        workspace: test-workspace
+      taskSpec:
+        workspaces:
+        - name: shared
+        steps:
+        - name: test-step
+          image: alpine:latest
+          script: |
+            #!/bin/sh
+            echo "Testing workspace access..."
+            ls -la $(workspaces.shared.path)
+            echo "Creating test file..."
+            echo "Hello from Tekton" > $(workspaces.shared.path)/test.txt
+            cat $(workspaces.shared.path)/test.txt
+            echo "Test completed successfully!"
+  workspaces:
+  - name: test-workspace
+    persistentVolumeClaim:
+      claimName: source-code-workspace 

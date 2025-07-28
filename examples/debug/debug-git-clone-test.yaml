@@ -1,0 +1,52 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: debug-git-clone-test
+  namespace: tekton-pipelines
+spec:
+  pipelineSpec:
+    workspaces:
+    - name: workspace
+    tasks:
+    - name: git-clone-test
+      workspaces:
+      - name: shared
+        workspace: workspace
+      taskSpec:
+        workspaces:
+        - name: shared
+        params:
+        - name: git-repo-url
+          type: string
+        steps:
+        - name: clone-step
+          image: alpine/git:latest
+          script: |
+            #!/bin/sh
+            set -eu
+            echo "🚀 Starting git clone test..."
+            echo "📁 Workspace path: $(workspaces.shared.path)"
+            echo "🔗 Repository URL: $(params.git-repo-url)"
+            
+            cd $(workspaces.shared.path)
+            
+            echo "📥 Cloning repository..."
+            git clone "$(params.git-repo-url)" source
+            
+            cd source
+            echo "✅ Clone completed. Repository contents:"
+            ls -la
+            
+            if [ -d "notebooks" ]; then
+              echo "✅ notebooks/ directory found"
+              ls -la notebooks/ | head -5
+            fi
+            
+            echo "✅ Git clone test completed successfully"
+      params:
+      - name: git-repo-url
+        value: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+  workspaces:
+  - name: workspace
+    persistentVolumeClaim:
+      claimName: source-code-workspace 

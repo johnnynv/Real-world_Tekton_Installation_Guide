@@ -2,8 +2,38 @@
 
 本指南详细介绍如何在 Kubernetes 集群上安装 Tekton 核心组件。
 
+## ⚠️ 重要：环境清理
+
+**如果您的环境中已经安装了 Tekton 组件，请先执行完整清理！**
+
+### 检查现有安装
+```bash
+# 检查是否存在 Tekton 命名空间
+kubectl get namespaces | grep tekton
+
+# 检查现有 Tekton 组件
+kubectl get pods --all-namespaces | grep tekton
+```
+
+### 完整环境清理
+如果发现已有 Tekton 组件，请执行完整清理：
+
+```bash
+# 赋予清理脚本执行权限
+chmod +x scripts/cleanup/clean-tekton-environment.sh
+
+# 执行完整清理（需要确认）
+./scripts/cleanup/clean-tekton-environment.sh
+```
+
+⚠️ **清理确认**：
+- 脚本会要求输入 `yes` 确认清理
+- 清理操作不可逆，请谨慎操作
+- 清理完成后环境将完全干净
+
 ## 📋 安装目标
 
+- ✅ 完整清理现有环境（如需要）
 - ✅ 安装 Tekton Pipelines（核心引擎）
 - ✅ 安装 Tekton Dashboard（Web UI）
 - ✅ 配置 Ingress 访问（可选）
@@ -19,7 +49,7 @@
 ### 检查集群状态
 ```bash
 # 检查 Kubernetes 版本
-kubectl version --short
+kubectl version
 
 # 检查集群节点状态
 kubectl get nodes
@@ -77,35 +107,44 @@ kubectl get pods -n tekton-pipelines | grep dashboard
 kubectl get svc -n tekton-pipelines | grep dashboard
 ```
 
-## 🌐 步骤3：配置访问方式
+## 🌐 步骤3：配置生产级访问（HTTPS + 认证）
 
-### 方式1：端口转发（开发环境）
+### 生产级安全配置
 ```bash
-# 启动端口转发
-kubectl port-forward -n tekton-pipelines svc/tekton-dashboard 9097:9097
+# 安装必要工具
+sudo apt-get update && sudo apt-get install -y apache2-utils openssl
 
-# 在浏览器访问
-# http://localhost:9097
+# 赋予配置脚本执行权限
+chmod +x scripts/install/02-configure-tekton-dashboard.sh
+
+# 执行生产级配置（自动生成证书和密码）
+./scripts/install/02-configure-tekton-dashboard.sh
 ```
 
-### 方式2：NodePort 服务（推荐）
+### 自定义配置参数
 ```bash
-# 创建 NodePort 服务
-kubectl patch svc tekton-dashboard -n tekton-pipelines -p '{"spec":{"type":"NodePort"}}'
-
-# 获取访问端口
-kubectl get svc tekton-dashboard -n tekton-pipelines
+# 使用自定义域名和密码
+./scripts/install/02-configure-tekton-dashboard.sh \
+  --host tekton.YOUR_IP.nip.io \
+  --admin-user admin \
+  --admin-password your-secure-password \
+  --ingress-class nginx
 ```
 
-访问 Dashboard：
+### 配置域名访问
+使用 nip.io 免费域名服务，无需配置 DNS 或 hosts 文件：
 ```bash
-# 获取节点 IP
-NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+# 使用实际的外部IP地址配置域名
+EXTERNAL_IP=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+echo "Dashboard URL: https://tekton.${EXTERNAL_IP}.nip.io"
+```
 
-# 获取端口
-NODE_PORT=$(kubectl get svc tekton-dashboard -n tekton-pipelines -o jsonpath='{.spec.ports[0].nodePort}')
-
-echo "Dashboard 访问地址: http://${NODE_IP}:${NODE_PORT}"
+### 直接访问
+```bash
+# 示例：使用当前配置的域名
+# https://tekton.10.117.8.154.nip.io
+# 用户名: admin
+# 密码: (脚本生成的密码)
 ```
 
 ## ✅ 验证完整安装

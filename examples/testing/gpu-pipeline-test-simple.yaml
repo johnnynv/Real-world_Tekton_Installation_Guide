@@ -1,0 +1,37 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-env-test-simple
+  namespace: tekton-pipelines
+  labels:
+    test-type: "simplified-debug"
+spec:
+  pipelineSpec:
+    workspaces:
+    - name: source-code-workspace
+    - name: shared-artifacts-workspace
+    tasks:
+    - name: prepare-environment-only
+      taskRef:
+        name: gpu-env-preparation
+      params:
+      - name: git-repo-url
+        value: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+      - name: git-revision
+        value: "main"
+      - name: verbose
+        value: "true"
+      workspaces:
+      - name: source-code
+        workspace: source-code-workspace
+      - name: shared-storage
+        workspace: shared-artifacts-workspace
+  workspaces:
+  - name: source-code-workspace
+    persistentVolumeClaim:
+      claimName: source-code-workspace
+  - name: shared-artifacts-workspace
+    persistentVolumeClaim:
+      claimName: shared-artifacts-workspace
+  timeouts:
+    pipeline: "1h" 

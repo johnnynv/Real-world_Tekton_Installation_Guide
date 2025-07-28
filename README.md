@@ -37,16 +37,35 @@ Real-world_Tekton_Installation_Guide/
 ├── examples/                                # Tekton configurations
 │   ├── tasks/                              # Task definitions
 │   │   ├── gpu-env-preparation-task.yaml
+│   │   ├── gpu-env-preparation-task-fixed.yaml    # Fixed version for workspace issues
 │   │   ├── gpu-papermill-execution-task.yaml
 │   │   ├── jupyter-nbconvert-task.yaml
 │   │   └── pytest-execution-task.yaml
 │   ├── pipelines/                          # Pipeline definitions
-│   │   └── gpu-scientific-computing-pipeline.yaml
-│   └── triggers/                           # Trigger configurations
-│       ├── gpu-pipeline-rbac.yaml
-│       └── gpu-pipeline-trigger-template.yaml
+│   │   ├── gpu-scientific-computing-pipeline.yaml
+│   │   └── gpu-complete-pipeline-fixed.yaml       # Fixed version of complete pipeline
+│   ├── triggers/                           # Trigger configurations
+│   │   ├── gpu-pipeline-rbac.yaml
+│   │   └── gpu-pipeline-trigger-template.yaml
+│   ├── dashboard/                          # Dashboard configurations
+│   │   └── tekton-dashboard-ingress-production.yaml
+│   ├── workspaces/                         # Workspace configurations
+│   │   └── gpu-pipeline-workspaces.yaml   # PVC workspace configurations
+│   ├── runs/                               # Manual run examples
+│   │   └── gpu-pipeline-manual-run.yaml   # Manual pipeline run example
+│   ├── debug/                              # Debug utilities
+│   │   ├── debug-workspace-test.yaml       # Workspace functionality test
+│   │   └── debug-git-clone-test.yaml       # Git clone functionality test
+│   └── testing/                            # Testing utilities
+│       ├── gpu-test-pod.yaml               # GPU hardware access test
+│       ├── gpu-env-test-fixed.yaml         # Environment preparation task test
+│       ├── gpu-papermill-debug-test.yaml   # GPU papermill debug test
+│       ├── gpu-papermill-notebook-test.yaml # Papermill notebook execution test
+│       └── gpu-pipeline-test-simple.yaml   # Simplified pipeline test
 ├── scripts/                                # Deployment scripts
 │   ├── deploy-complete-pipeline.sh         # One-click deployment
+│   ├── execute-gpu-pipeline.sh             # Manual execution script
+│   ├── validate-gpu-pipeline.sh            # End-to-end validation script
 │   ├── verify-deployment.sh               # Deployment verification
 │   ├── install/                           # Installation scripts
 │   ├── cleanup/                           # Cleanup scripts
