@@ -1,0 +1,96 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: rmm-verification-test
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: rmm-verification-test
+    app.kubernetes.io/component: tekton-pipeline
+    test-type: "rmm-verification"
+spec:
+  pipelineSpec:
+    description: |
+      RMM problem verification test to confirm if the issue is resolved.
+      
+      Tests:
+      - RMM initialization with current setup
+      - GPU context in Jupyter kernel
+      - Accurate success/failure detection
+    
+    workspaces:
+    - name: shared-storage
+      description: Shared workspace for testing
+    
+    tasks:
+    # Task 1: Git Clone from correct repo and branch
+    - name: git-clone-blueprint-repo
+      taskSpec:
+        workspaces:
+        - name: output
+        steps:
+        - name: clone
+          image: alpine/git:latest
+          script: |
+            #!/bin/sh
+            set -eu
+            
+            echo "🚀 Cloning single-cell-analysis-blueprint repository for RMM test..."
+            cd $(workspaces.output.path)
+            
+            # Completely clean workspace (including hidden files)
+            find . -mindepth 1 -delete 2>/dev/null || true
+            
+            # Clone correct repository and branch
+            git clone --branch johnnynv-patch-dev "https://github.com/bp-cicd-org/single-cell-analysis-blueprint.git" .
+            
+            echo "✅ Repository cloned successfully from johnnynv-patch-dev branch"
+            if [ -d "notebooks" ]; then
+              echo "✅ notebooks/ directory found"
+              ls -la notebooks/ | head -3
+            fi
+            if [ -d "docker/brev" ]; then
+              echo "✅ docker/brev/ directory found"
+              ls -la docker/brev/ | head -3
+            fi
+      workspaces:
+      - name: output
+        workspace: shared-storage
+    
+    # Task 2: RMM-focused notebook execution test with Init Container
+    - name: rmm-focused-test
+      taskRef:
+        name: gpu-papermill-production-init-rmm-fixed
+      runAfter: ["git-clone-blueprint-repo"]
+      workspaces:
+      - name: shared-storage
+        workspace: shared-storage
+      params:
+      - name: notebook-relative-dir
+        value: "notebooks"
+      - name: notebook-filename
+        value: "01_scRNA_analysis_preprocessing.ipynb"
+      - name: output-notebook
+        value: "rmm_test_output.ipynb"
+      - name: container-image
+        value: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  
+  workspaces:
+  - name: shared-storage
+    persistentVolumeClaim:
+      claimName: source-code-workspace
+  
+  taskRunTemplate:
+    serviceAccountName: tekton-pipeline-service
+    podTemplate:
+      securityContext:
+        fsGroup: 1001  # rapids group
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+  
+  timeouts:
+    pipeline: "15m"
+    tasks: "10m" 

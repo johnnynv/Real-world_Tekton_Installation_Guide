@@ -1,0 +1,269 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gpu-papermill-execution-docker-compose-mode
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-papermill-execution-docker-compose-mode
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    GPU-accelerated Papermill execution that exactly mimics Docker Compose configuration.
+    Uses rapids user and exact same environment settings as successful Docker Compose setup.
+  params:
+  - name: notebook-relative-dir
+    description: Relative directory containing the notebook
+    type: string
+    default: "notebooks"
+  - name: notebook-filename
+    description: Notebook filename to execute
+    type: string
+    default: "01_scRNA_analysis_preprocessing.ipynb"
+  - name: output-notebook
+    description: Name for the output notebook
+    type: string
+    default: "01_scRNA_analysis_preprocessing_output.ipynb"
+  - name: container-image
+    description: Container image to use for execution
+    type: string
+    default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  workspaces:
+  - name: shared-storage
+    description: Shared workspace for input/output files
+    mountPath: /workspace/shared
+  results:
+  - name: execution-status
+    description: Status of papermill execution
+  - name: output-notebook-path
+    description: Path to the executed notebook
+  - name: papermill-log-path
+    description: Path to the papermill execution log
+  steps:
+  - name: gpu-papermill-docker-compose-mode
+    image: $(params.container-image)
+    computeResources:
+      requests:
+        nvidia.com/gpu: 1
+        memory: 16Gi
+        cpu: 4
+      limits:
+        nvidia.com/gpu: 1
+        memory: 32Gi
+        cpu: 8
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["IPC_LOCK", "SYS_RESOURCE"]
+      runAsNonRoot: false
+      runAsUser: 1000  # rapids user ID
+      runAsGroup: 1000 # rapids group ID
+      seccompProfile:
+        type: RuntimeDefault
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility"
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: GPU_CACHE_PATH
+      value: $(workspaces.shared-storage.path)/gpu-cache
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: NOTEBOOK_RELATIVED_DIR
+      value: $(params.notebook-relative-dir)
+    - name: NOTEBOOK_FILENAME
+      value: $(params.notebook-filename)
+    - name: OUTPUT_NOTEBOOK
+      value: $(params.output-notebook)
+    - name: EXTRA_PIP_PACKAGES
+      value: "anndata==0.11.4 array-api-compat==1.12.0 contourpy==1.3.2 cycler==0.12.1 fonttools==4.58.0 h5py==3.13.0 imageio==2.37.0 joblib==1.5.1 kiwisolver==1.4.8 lazy-loader==0.4 legacy-api-wrap==1.4.1 llvmlite==0.44.0 matplotlib==3.10.3 natsort==8.4.0 networkx==3.4.2 numba==0.61.2 numpy==2.2.6 pandas==2.2.3 patsy==1.0.1 pillow==11.2.1 pynndescent==0.5.13 rapids-singlecell==0.12.6 scanpy==1.11.2 scikit-image==0.25.2 scikit-misc==0.5.1 scipy==1.15.3 seaborn==0.13.2 session-info2==0.1.2 statsmodels==0.14.4 threadpoolctl==3.6.0 tifffile==2025.5.10 tqdm==4.67.1 tzdata==2025.2 umap-learn==0.5.7 wget==3.2 deprecated==1.2.18 numcodecs==0.15.1 wrapt==1.17.2 zarr==2.18.7"
+    - name: HOME
+      value: "/home/rapids"  # rapids用户的home目录
+    - name: PATH
+      value: "/home/rapids/.local/bin:/opt/conda/bin:/usr/local/bin:/usr/bin:/bin"
+    - name: CONDA_DEFAULT_ENV
+      value: "base"
+    volumeMounts:
+    - name: dshm
+      mountPath: /dev/shm
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "Starting GPU Papermill Execution (Docker Compose Compatible Mode)..."
+      echo "Running as user: $(whoami) ($(id))"
+      echo "Home directory: $HOME"
+      echo "Target notebook: ${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}"
+      echo "Shared workspace: ${WORKSPACE_SHARED_PATH}"
+      
+      # Apply Docker Compose compatible memory settings
+      echo "Applying Docker Compose compatible memory settings..."
+      ulimit -l unlimited 2>/dev/null || echo "WARNING: Cannot set unlimited memlock"
+      ulimit -s 67108864 2>/dev/null || echo "WARNING: Cannot set stack size"
+      
+      # Ensure shared memory is available
+      if [ -d "/dev/shm" ]; then
+        echo "Shared memory available: $(df -h /dev/shm | tail -1)"
+      fi
+      
+      # Setup environment exactly like Docker Compose
+      export HOME="/home/rapids"
+      export USER="rapids"
+      export PATH="/home/rapids/.local/bin:/opt/conda/bin:$PATH"
+      
+      # Navigate to workspace and copy notebook files
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Copy files to rapids home directory (mimicking Docker Compose behavior)
+      echo "Copying files to rapids home directory (Docker Compose style)..."
+      
+      # Ensure we can write to the shared workspace artifacts directory
+      mkdir -p "${DOCKER_WRITEABLE_DIR}"
+      
+      # Create necessary directories
+      mkdir -p "${GPU_CACHE_PATH}"
+      
+      # Verify GPU availability
+      echo "Checking GPU availability..."
+      nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || echo "WARNING: nvidia-smi failed"
+      
+      # Verify notebook exists
+      NOTEBOOK_PATH="${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}"
+      if [ ! -f "${NOTEBOOK_PATH}" ]; then
+        echo "ERROR: Notebook not found: ${NOTEBOOK_PATH}"
+        find . -name "*.ipynb" -type f | head -5
+        exit 1
+      fi
+      
+      echo "Notebook found: ${NOTEBOOK_PATH}"
+      
+      # Setup Python environment using rapids user's environment
+      echo "Setting up Python environment as rapids user..."
+      
+      # Use conda/pip as rapids user (should have proper permissions)
+      PYTHON_BIN="/opt/conda/bin/python"
+      PIP_BIN="/opt/conda/bin/pip"
+      CONDA_BIN="/opt/conda/bin/conda"
+      
+      echo "Using rapids user environment"
+      
+      # Verify Python environment
+      echo "Python environment verification:"
+      $PYTHON_BIN --version && echo "Python OK" || (echo "ERROR: Python failed" && exit 1)
+      $PIP_BIN --version && echo "pip OK" || (echo "ERROR: pip failed" && exit 1)
+      $CONDA_BIN --version && echo "conda OK" || (echo "ERROR: conda failed" && exit 1)
+      
+      # Install dependencies using rapids user permissions
+      echo "Installing dependencies as rapids user..."
+      $PIP_BIN install --user --quiet --no-cache-dir papermill ipykernel jupyter || {
+        echo "ERROR: Failed to install papermill"
+        exit 1
+      }
+      
+      # Install additional packages exactly like Docker Compose
+      if [ -n "${EXTRA_PIP_PACKAGES:-}" ]; then
+        echo "Installing packages exactly like Docker Compose..."
+        
+        # Try conda first for better compatibility (Docker Compose approach)
+        echo "Installing scanpy with conda..."
+        $CONDA_BIN install -y -c conda-forge -c bioconda scanpy || {
+          echo "WARNING: Conda scanpy failed, trying pip..."
+          $PIP_BIN install --user --quiet --no-cache-dir scanpy || echo "WARNING: scanpy installation failed"
+        }
+        
+        # Install other packages with pip
+        echo "Installing other packages with pip..."
+        $PIP_BIN install --user --quiet --no-cache-dir ${EXTRA_PIP_PACKAGES} || echo "WARNING: Some pip packages failed"
+        
+        # Verify key packages
+        echo "Verifying key package installations..."
+        $PYTHON_BIN -c "import scanpy as sc; print('SUCCESS: scanpy version:', sc.__version__)" || {
+          echo "ERROR: scanpy verification failed"
+          # Try again without --user flag
+          $PIP_BIN install --quiet --no-cache-dir scanpy || echo "CRITICAL ERROR: scanpy installation completely failed"
+          $PYTHON_BIN -c "import scanpy as sc; print('SUCCESS: scanpy version:', sc.__version__)" || {
+            echo "CRITICAL ERROR: scanpy still not working"
+            exit 1
+          }
+        }
+        
+        $PYTHON_BIN -c "import cupy as cp; print('SUCCESS: cupy GPU count:', cp.cuda.runtime.getDeviceCount())" || echo "WARNING: cupy verification failed"
+        
+        # Most importantly - verify RMM works
+        echo "Testing RMM initialization (the critical component)..."
+        $PYTHON_BIN -c "import rmm; from rmm.allocators.cupy import rmm_cupy_allocator; import cupy as cp; rmm.reinitialize(managed_memory=False, pool_allocator=False, devices=0); cp.cuda.set_allocator(rmm_cupy_allocator); print('SUCCESS: RMM initialization worked!')" || echo "WARNING: RMM test failed - this explains the original notebook issue"
+      fi
+      
+      # Setup GPU environment
+      export CUDA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-"all"}
+      export CUPY_CACHE_DIR="${GPU_CACHE_PATH}/cupy"
+      export NUMBA_CACHE_DIR="${GPU_CACHE_PATH}/numba"
+      mkdir -p "${CUPY_CACHE_DIR}" "${NUMBA_CACHE_DIR}" 2>/dev/null || echo "WARNING: Cannot create cache dirs"
+      
+      # Find papermill executable in rapids user environment
+      PAPERMILL_BIN=""
+      if [ -x "/home/rapids/.local/bin/papermill" ]; then
+        PAPERMILL_BIN="/home/rapids/.local/bin/papermill"
+      elif [ -x "/opt/conda/bin/papermill" ]; then
+        PAPERMILL_BIN="/opt/conda/bin/papermill"
+      else
+        echo "ERROR: papermill not found after installation"
+        exit 1
+      fi
+      
+      # Execute notebook with EXACT GitHub Actions parameters
+      echo "Executing notebook with Papermill (Docker Compose Compatible Mode)..."
+      PAPERMILL_OUTPUT_PATH="${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}"
+      PAPERMILL_LOG_PATH="${DOCKER_WRITEABLE_DIR}/papermill.log"
+      
+      echo "Command: $PAPERMILL_BIN \"${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}\" \"${PAPERMILL_OUTPUT_PATH}\" --log-output --log-level DEBUG --progress-bar --report-mode --kernel python3"
+      
+      # Execute with EXACT same parameters as GitHub Actions, but in rapids user environment
+      PAPERMILL_EXIT_CODE=0
+      $PAPERMILL_BIN "${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}" "${PAPERMILL_OUTPUT_PATH}" \
+          --log-output \
+          --log-level DEBUG \
+          --progress-bar \
+          --report-mode \
+          --kernel python3 2>&1 | tee "${PAPERMILL_LOG_PATH}" || PAPERMILL_EXIT_CODE=$?
+      
+      # Proper error checking
+      if [ $PAPERMILL_EXIT_CODE -ne 0 ]; then
+        echo "ERROR: Papermill execution failed with exit code: $PAPERMILL_EXIT_CODE"
+        echo "Last 30 lines of papermill log:"
+        tail -30 "${PAPERMILL_LOG_PATH}" || true
+        echo -n "failed" > "$(results.execution-status.path)"
+        exit 1
+      fi
+      
+      # Check for execution errors in the log
+      if grep -q "PapermillExecutionError" "${PAPERMILL_LOG_PATH}"; then
+        echo "ERROR: Papermill execution failed - PapermillExecutionError found in log"
+        echo "Last 30 lines of papermill log:"
+        tail -30 "${PAPERMILL_LOG_PATH}" || true
+        echo -n "failed" > "$(results.execution-status.path)"
+        exit 1
+      fi
+      
+      # Verify output
+      if [ -f "${PAPERMILL_OUTPUT_PATH}" ]; then
+        OUTPUT_SIZE=$(du -h "${PAPERMILL_OUTPUT_PATH}" | cut -f1)
+        echo "SUCCESS: Output notebook created: ${OUTPUT_SIZE}"
+        echo -n "success" > "$(results.execution-status.path)"
+        echo -n "${PAPERMILL_OUTPUT_PATH}" > "$(results.output-notebook-path.path)"
+        echo -n "${PAPERMILL_LOG_PATH}" > "$(results.papermill-log-path.path)"
+      else
+        echo "ERROR: Output notebook not found"
+        echo -n "failed" > "$(results.execution-status.path)"
+        exit 1
+      fi
+      
+      echo "Docker Compose compatible Papermill execution finished!"
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 1Gi 

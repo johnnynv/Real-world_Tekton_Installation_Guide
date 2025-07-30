@@ -1,0 +1,107 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-production-init-simple-test
+  namespace: tekton-pipelines
+  labels:
+    app: gpu-scientific-computing
+    trigger: manual
+    gpu-pipeline: "true"
+    production-ready: "true"
+    test-type: "init-container-simple"
+  annotations:
+    tekton.dev/pipeline-type: "gpu-scientific-computing-production-init-simple"
+    tekton.dev/test-notebook: "01_scRNA_analysis_preprocessing.ipynb"
+    tekton.dev/execution-mode: "init-container-production-simple"
+spec:
+  pipelineSpec:
+    description: |
+      Simple Production Init Container test pipeline for GPU-accelerated notebook execution.
+      
+      This validates the Init Container pattern with a minimal pipeline:
+      - Environment preparation (git clone)
+      - Execute notebook with production init container solution
+    
+    params:
+    - name: git-repo-url
+      description: Git repository URL containing the notebook to execute
+      type: string
+      default: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+    - name: git-revision
+      description: Git revision to checkout
+      type: string
+      default: "main"
+    - name: notebook-filename
+      description: Notebook filename to execute
+      type: string
+      default: "01_scRNA_analysis_preprocessing.ipynb"
+    - name: output-notebook
+      description: Name for the executed notebook output
+      type: string
+      default: "01_scRNA_analysis_preprocessing_output.ipynb"
+    - name: container-image
+      description: GPU-enabled container image for notebook execution
+      type: string
+      default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+    
+    workspaces:
+    - name: processing-workspace
+      description: Processing workspace for analysis
+    
+    tasks:
+    # Task 1: Environment preparation
+    - name: prepare-environment
+      taskRef:
+        name: gpu-env-preparation-fixed
+      params:
+      - name: git-repo-url
+        value: $(params.git-repo-url)
+      - name: git-revision
+        value: $(params.git-revision)
+      - name: verbose
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Task 2: Execute notebook with production init container solution
+    - name: execute-notebook-production-init
+      taskRef:
+        name: gpu-papermill-execution-production-init
+      runAfter: ["prepare-environment"]
+      params:
+      - name: notebook-relative-dir
+        value: "notebooks"
+      - name: notebook-filename
+        value: $(params.notebook-filename)
+      - name: output-notebook
+        value: $(params.output-notebook)
+      - name: container-image
+        value: $(params.container-image)
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    workspaces:
+    - name: processing-workspace
+      description: Processing workspace for analysis
+    
+  taskRunTemplate:
+    podTemplate:
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      securityContext:
+        fsGroup: 1000  # Ubuntu group for consistency
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    serviceAccountName: default
+  
+  timeouts:
+    pipeline: "2h0m0s"
+  
+  workspaces:
+  - name: processing-workspace
+    persistentVolumeClaim:
+      claimName: processing-workspace 

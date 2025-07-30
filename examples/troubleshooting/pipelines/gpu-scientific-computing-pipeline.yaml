@@ -83,12 +83,8 @@ spec:
     default: "true"
   
   workspaces:
-  - name: source-code-workspace
-    description: Workspace for source code checkout and processing
   - name: shared-artifacts-workspace
     description: Shared workspace for artifacts between tasks
-  - name: gpu-cache-workspace
-    description: GPU computation cache workspace for performance optimization
   - name: test-execution-workspace
     description: Workspace for test framework and execution
   
@@ -104,7 +100,7 @@ spec:
   # Task 1: Environment preparation and code checkout
   - name: prepare-environment
     taskRef:
-      name: gpu-env-preparation
+      name: gpu-env-preparation-fixed
     params:
     - name: git-repo-url
       value: $(params.git-repo-url)
@@ -113,8 +109,6 @@ spec:
     - name: verbose
       value: $(params.verbose-logging)
     workspaces:
-    - name: source-code
-      workspace: source-code-workspace
     - name: shared-storage
       workspace: shared-artifacts-workspace
   
@@ -139,8 +133,6 @@ spec:
     workspaces:
     - name: shared-storage
       workspace: shared-artifacts-workspace
-    - name: gpu-cache
-      workspace: gpu-cache-workspace
   
   # Task 3: Convert notebook to HTML (depends on notebook execution)
   - name: convert-to-html

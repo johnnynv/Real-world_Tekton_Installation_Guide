@@ -58,28 +58,100 @@ spec:
       mkdir -p "${WORKSPACE_SHARED_PATH}/artifacts"
       mkdir -p "${WORKSPACE_SHARED_PATH}/notebooks"
       
-      # Clone repository
-      echo "📥 Cloning repository..."
+      # Safe git clone with backup mechanism
+      echo "📥 Starting safe git clone..."
       cd "${WORKSPACE_SHARED_PATH}"
       
-      # Remove existing directory if it exists
-      if [ -d "$(params.workspace-subdir)" ]; then
-        echo "🧹 Removing existing directory: $(params.workspace-subdir)"
-        rm -rf "$(params.workspace-subdir)"
+      TARGET_DIR="$(params.workspace-subdir)"
+      
+      # Function to handle existing directory safely
+      if [ -d "${TARGET_DIR}" ]; then
+        echo "⚠️  Target directory '${TARGET_DIR}' already exists"
+        
+        # Create backup with timestamp
+        TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+        BACKUP_DIR="${TARGET_DIR}_backup_${TIMESTAMP}"
+        
+        echo "💾 Creating backup: ${BACKUP_DIR}"
+        if mv "${TARGET_DIR}" "${BACKUP_DIR}"; then
+          echo "✅ Backup created successfully: ${BACKUP_DIR}"
+        else
+          echo "❌ Failed to create backup, removing existing directory"
+          rm -rf "${TARGET_DIR}"
+        fi
+      else
+        echo "✅ Target directory doesn't exist, proceeding with clone"
       fi
+      
+      # Perform git clone with retry mechanism
+      CLONE_SUCCESS=false
+      MAX_RETRIES=3
+      
+      for attempt in $(seq 1 ${MAX_RETRIES}); do
+        echo "🔄 Clone attempt ${attempt}/${MAX_RETRIES}"
       
       if [ "$(params.verbose)" = "true" ]; then
-        git clone --verbose "$(params.git-repo-url)" "$(params.workspace-subdir)"
+          if git clone --verbose "$(params.git-repo-url)" "${TARGET_DIR}"; then
+            CLONE_SUCCESS=true
+            echo "✅ Git clone successful on attempt ${attempt}"
+            break
+          fi
       else
-        git clone "$(params.git-repo-url)" "$(params.workspace-subdir)"
+          if git clone "$(params.git-repo-url)" "${TARGET_DIR}" 2>&1; then
+            CLONE_SUCCESS=true
+            echo "✅ Git clone successful on attempt ${attempt}"
+            break
+          fi
+        fi
+        
+        echo "❌ Clone attempt ${attempt} failed"
+        
+        # Clean up partial clone
+        if [ -d "${TARGET_DIR}" ]; then
+          echo "🧹 Cleaning up partial clone"
+          rm -rf "${TARGET_DIR}"
       fi
       
-      cd "$(params.workspace-subdir)"
+        # Wait before retry (exponential backoff)
+        if [ ${attempt} -lt ${MAX_RETRIES} ]; then
+          WAIT_TIME=$((attempt * 5))
+          echo "⏳ Waiting ${WAIT_TIME} seconds before retry"
+          sleep ${WAIT_TIME}
+        fi
+      done
       
-      # Checkout specific revision
+      # Check if clone was successful
+      if [ "${CLONE_SUCCESS}" != "true" ]; then
+        echo "❌ All clone attempts failed"
+        exit 1
+      fi
+      
+      # Safely navigate to target directory
+      if [ ! -d "${TARGET_DIR}" ]; then
+        echo "❌ Target directory does not exist after clone"
+        exit 1
+      fi
+      
+      cd "${TARGET_DIR}"
+      
+      # Checkout specific revision with error handling
       if [ "$(params.git-revision)" != "main" ] && [ "$(params.git-revision)" != "master" ]; then
         echo "🔄 Checking out revision: $(params.git-revision)"
-        git checkout "$(params.git-revision)"
+        
+        # Fetch remote refs in case the revision is a remote branch/tag
+        git fetch origin 2>/dev/null || true
+        
+        if git checkout "$(params.git-revision)"; then
+          echo "✅ Successfully checked out revision: $(params.git-revision)"
+        else
+          echo "❌ Failed to checkout revision: $(params.git-revision)"
+          echo "Available branches and tags:"
+          git branch -a || true
+          git tag | head -10 || true
+          exit 1
+        fi
+      else
+        echo "ℹ️  Using default branch: $(params.git-revision)"
       fi
       
       # Get commit information

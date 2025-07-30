@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-scanpy-dependency-test
+  namespace: tekton-pipelines
+  labels:
+    test-type: dependency-validation
+spec:
+  nodeSelector:
+    accelerator: nvidia-tesla-gpu
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - name: scanpy-test
+    image: nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12
+    command: ["/bin/bash"]
+    args:
+    - -c
+    - |
+      echo "🚀 Starting scanpy dependency test..."
+      
+      echo "🔍 Initial environment check..."
+      nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+      echo "Python: $(which python)"
+      echo "Conda: $(which conda)"
+      echo "Pip: $(which pip)"
+      
+      # Test 1: Try conda installation first
+      echo ""
+      echo "🧪 TEST 1: Conda installation of scanpy..."
+      conda install -y -c conda-forge -c bioconda scanpy || echo "❌ Conda failed"
+      
+      # Test scanpy import
+      echo "🔍 Testing scanpy import..."
+      python -c "import scanpy as sc; print('✅ scanpy version:', sc.__version__)" && {
+        echo "🎉 CONDA METHOD SUCCESS!"
+        python -c "import cupy as cp; print('GPU devices:', cp.cuda.runtime.getDeviceCount())"
+        exit 0
+      } || echo "❌ Conda method failed"
+      
+      # Test 2: Try pip with --user
+      echo ""
+      echo "🧪 TEST 2: Pip --user installation..."
+      pip install --user --no-cache-dir scanpy || echo "❌ Pip --user failed"
+      
+      python -c "import scanpy as sc; print('✅ scanpy version:', sc.__version__)" && {
+        echo "✅ PIP --USER METHOD SUCCESS!"
+        exit 0
+      } || echo "❌ Pip --user method failed"
+      
+      # Test 3: Standard pip
+      echo ""
+      echo "🧪 TEST 3: Standard pip installation..."
+      pip install --no-cache-dir scanpy || echo "❌ Standard pip failed"
+      
+      python -c "import scanpy as sc; print('✅ scanpy version:', sc.__version__)" && {
+        echo "✅ STANDARD PIP METHOD SUCCESS!"
+        exit 0
+      } || echo "❌ Standard pip method failed"
+      
+      # Test 4: Target install with PYTHONPATH
+      echo ""
+      echo "🧪 TEST 4: Target installation..."
+      pip install --target /tmp/python-packages scanpy || echo "❌ Target install failed"
+      
+      export PYTHONPATH="/tmp/python-packages:$PYTHONPATH"
+      python -c "import sys; sys.path.insert(0, '/tmp/python-packages'); import scanpy as sc; print('✅ scanpy version:', sc.__version__)" && {
+        echo "✅ PYTHONPATH METHOD SUCCESS!"
+        echo "📝 Use: pip install --target /tmp/python-packages && export PYTHONPATH=/tmp/python-packages:$$PYTHONPATH"
+        exit 0
+      } || echo "❌ PYTHONPATH method failed"
+      
+      echo "❌ All methods failed"
+      echo "Debug info:"
+      echo "User: $(whoami)"
+      echo "Home: $HOME"
+      pip list | grep -E "(scanpy|pandas|numpy)" || echo "No relevant packages found"
+      exit 1
+      
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+        memory: 8Gi
+        cpu: 2
+      requests:
+        nvidia.com/gpu: 1
+        memory: 4Gi
+        cpu: 1
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+  restartPolicy: Never 

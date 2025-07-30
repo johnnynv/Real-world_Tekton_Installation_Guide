@@ -1,0 +1,122 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: jupyter-nbconvert
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: jupyter-nbconvert
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    Jupyter nbconvert task for converting executed notebooks to HTML format.
+    Processes notebook files and generates publication-ready HTML reports.
+  params:
+  - name: input-notebook-name
+    description: Name of the input notebook file to convert
+    type: string
+    default: "executed_notebook.ipynb"
+  - name: output-html-name
+    description: Name for the output HTML file
+    type: string
+    default: "executed_notebook.html"
+  - name: nbconvert-template
+    description: Template to use for nbconvert
+    type: string
+    default: "html"
+  - name: embed-images
+    description: Whether to embed images in HTML
+    type: string
+    default: "true"
+  workspaces:
+  - name: shared-storage
+    description: Shared storage for input notebook and output HTML
+    mountPath: /workspace/shared
+  results:
+  - name: conversion-status
+    description: Status of HTML conversion
+  - name: output-html-path
+    description: Path to the generated HTML file
+  - name: html-size
+    description: Size of the generated HTML file
+  steps:
+  - name: convert-to-html
+    image: jupyter/minimal-notebook:latest
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: INPUT_NOTEBOOK
+      value: $(params.input-notebook-name)
+    - name: OUTPUT_NOTEBOOK_HTML
+      value: $(params.output-html-name)
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "🔄 Starting Jupyter nbconvert HTML conversion..."
+      echo "📁 Shared workspace: ${WORKSPACE_SHARED_PATH}"
+      echo "📓 Input notebook: ${INPUT_NOTEBOOK}"
+      echo "🌐 Output HTML: ${OUTPUT_NOTEBOOK_HTML}"
+      
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      if [ ! -f "${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}" ]; then
+        echo "❌ Input notebook not found: ${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}"
+        exit 1
+      fi
+      
+      echo "✅ Input notebook found: ${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}"
+      
+      pip install --quiet --no-cache-dir nbconvert
+      
+      NBCONVERT_OPTIONS=""
+      if [ "$(params.embed-images)" = "true" ]; then
+        NBCONVERT_OPTIONS="${NBCONVERT_OPTIONS} --embed-images"
+      fi
+      
+      jupyter nbconvert --to $(params.nbconvert-template) \
+        "${DOCKER_WRITEABLE_DIR}/${INPUT_NOTEBOOK}" \
+        --output "${OUTPUT_NOTEBOOK_HTML}" \
+        --output-dir "${DOCKER_WRITEABLE_DIR}" \
+        ${NBCONVERT_OPTIONS} \
+        > "${DOCKER_WRITEABLE_DIR}/jupyter_nbconvert.log" 2>&1
+      
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" ]; then
+        echo "✅ HTML file created successfully"
+        HTML_SIZE=$(du -h "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" | cut -f1)
+        echo -n "success" > "$(results.conversion-status.path)"
+        echo -n "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" > "$(results.output-html-path.path)"
+        echo -n "${HTML_SIZE}" > "$(results.html-size.path)"
+      else
+        echo "❌ HTML file not found after conversion"
+        echo -n "failed" > "$(results.conversion-status.path)"
+        exit 1
+      fi
+      
+  - name: prepare-for-testing
+    image: alpine:latest
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: OUTPUT_NOTEBOOK_HTML
+      value: $(params.output-html-name)
+    script: |
+      #!/bin/sh
+      set -eu
+      
+      echo "📋 Preparing HTML file for testing..."
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      mkdir -p "${DOCKER_WRITEABLE_DIR}/staging"
+      
+      if [ -f "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" ]; then
+        cp "${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK_HTML}" "${DOCKER_WRITEABLE_DIR}/staging/"
+        echo "✅ HTML file prepared for testing"
+      else
+        echo "❌ HTML file not found"
+        exit 1
+      fi

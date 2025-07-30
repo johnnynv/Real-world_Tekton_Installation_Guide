@@ -1,0 +1,142 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gpu-simple-test
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-simple-test
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    Simple GPU test to diagnose container-level GPU access issues.
+    Tests basic GPU detection without complex dependencies.
+  
+  params:
+  - name: container-image
+    description: Container image to use for testing
+    type: string
+    default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  
+  results:
+  - name: gpu-detection-status
+    description: Status of GPU detection test
+  
+  stepTemplate:
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility"
+  
+  steps:
+  # Step 1: Basic GPU Detection Test
+  - name: gpu-detection-test
+    image: $(params.container-image)
+    computeResources:
+      requests:
+        nvidia.com/gpu: 1
+        memory: 4Gi
+        cpu: 2
+      limits:
+        nvidia.com/gpu: 1
+        memory: 8Gi
+        cpu: 4
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+      runAsNonRoot: true
+      runAsUser: 1001  # rapids user
+      runAsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "=============================================="
+      echo "  GPU DETECTION DIAGNOSTIC TEST"
+      echo "=============================================="
+      echo ""
+      echo "Running as: $(whoami) ($(id))"
+      echo "Environment:"
+      echo "  NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES:-unset}"
+      echo "  NVIDIA_DRIVER_CAPABILITIES: ${NVIDIA_DRIVER_CAPABILITIES:-unset}"
+      echo ""
+      
+      # Test 1: nvidia-smi
+      echo "🔍 Test 1: nvidia-smi"
+      if command -v nvidia-smi >/dev/null 2>&1; then
+        echo "✅ nvidia-smi found"
+        nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || echo "❌ nvidia-smi failed"
+      else
+        echo "❌ nvidia-smi not found"
+      fi
+      echo ""
+      
+      # Test 2: Device files
+      echo "🔍 Test 2: GPU device files"
+      if [ -e /dev/nvidia0 ]; then
+        echo "✅ /dev/nvidia0 exists"
+        ls -la /dev/nvidia* 2>/dev/null || echo "Cannot list nvidia devices"
+      else
+        echo "❌ /dev/nvidia0 not found"
+        echo "Available devices in /dev:"
+        ls -la /dev/ | grep -i gpu || echo "No GPU devices found"
+      fi
+      echo ""
+      
+      # Test 3: NVIDIA container runtime
+      echo "🔍 Test 3: NVIDIA container runtime"
+      if [ -e /usr/bin/nvidia-container-cli ]; then
+        echo "✅ nvidia-container-cli found"
+      else
+        echo "❌ nvidia-container-cli not found"
+      fi
+      echo ""
+      
+      # Test 4: CUDA runtime test
+      echo "🔍 Test 4: CUDA runtime test"
+      export PATH="/opt/conda/bin:$PATH"
+      PYTHON_BIN="/opt/conda/bin/python"
+      
+      if [ -x "$PYTHON_BIN" ]; then
+        echo "Testing basic CUDA availability..."
+        
+        # Test Python
+        $PYTHON_BIN --version && echo "✅ Python accessible" || echo "❌ Python failed"
+        
+        # Test cupy import
+        $PYTHON_BIN -c "import cupy as cp; print('✅ cupy imported')" 2>/dev/null && echo "✅ cupy import OK" || echo "❌ cupy import failed"
+        
+        # Test GPU detection
+        $PYTHON_BIN -c "import cupy as cp; print('GPU count:', cp.cuda.runtime.getDeviceCount())" 2>/dev/null || echo "❌ GPU detection failed"
+        
+      else
+        echo "❌ Python not accessible"
+      fi
+      echo ""
+      
+      # Test 5: Environment and system info
+      echo "🔍 Test 5: System info"
+      echo "Kernel: $(uname -r)"
+      echo "Container info:"
+      cat /proc/1/cgroup | head -3 || true
+      echo ""
+      echo "Environment variables:"
+      env | grep -i nvidia || echo "No NVIDIA environment variables"
+      echo ""
+      
+      # Final status
+      if [ -e /dev/nvidia0 ] && command -v nvidia-smi >/dev/null 2>&1; then
+        echo "✅ GPU DETECTION: Basic GPU access appears available"
+        echo -n "success" > "$(results.gpu-detection-status.path)"
+      else
+        echo "❌ GPU DETECTION: GPU access issues detected"
+        echo -n "failed" > "$(results.gpu-detection-status.path)"
+      fi
+      
+      echo ""
+      echo "🏁 GPU DETECTION TEST COMPLETED"
+      echo "" 

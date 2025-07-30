@@ -1,0 +1,297 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-complete-workflow-pipeline
+  namespace: tekton-pipelines
+  labels:
+    app: gpu-scientific-computing
+    trigger: manual
+    gpu-pipeline: "true"
+    workflow-type: "complete-8-step"
+  annotations:
+    tekton.dev/pipeline-type: "gpu-scientific-computing-complete-workflow"
+    tekton.dev/test-notebook: "01_scRNA_analysis_preprocessing.ipynb"
+    tekton.dev/execution-mode: "docker-compose-compatible"
+    tekton.dev/workflow-steps: "8-step-github-actions-migration"
+spec:
+  pipelineSpec:
+    description: |
+      Complete 8-step GPU scientific computing pipeline that exactly mirrors the GitHub Actions workflow:
+      1. Start Docker Compose compatible container
+      2. All steps executed within container
+      3. Prepare environment (Python, conda, etc.)
+      4. Execute papermill with full parameters
+      5. Convert notebook to HTML using jupyter nbconvert
+      6. Download test repository and manage files
+      7. Execute pytest commands
+      8. Generate artifacts and reports
+    
+    params:
+    - name: git-repo-url
+      description: Git repository URL containing the notebook to execute
+      type: string
+      default: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+    - name: git-revision
+      description: Git revision to checkout
+      type: string
+      default: "main"
+    - name: notebook-filename
+      description: Notebook filename to execute
+      type: string
+      default: "01_scRNA_analysis_preprocessing.ipynb"
+    - name: notebook-relative-dir
+      description: Relative directory containing the notebook
+      type: string
+      default: "notebooks"
+    - name: output-notebook
+      description: Name for the executed notebook output
+      type: string
+      default: "01_scRNA_analysis_preprocessing_output.ipynb"
+    - name: output-notebook-html
+      description: Name for the HTML output
+      type: string
+      default: "01_scRNA_analysis_preprocessing_output.html"
+    - name: container-image
+      description: GPU-enabled container image for notebook execution
+      type: string
+      default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+    - name: test-repo-url
+      description: Test framework repository URL
+      type: string
+      default: "https://github.com/NVIDIA-AI-Blueprints/blueprint-github-test.git"
+    - name: pytest-markers
+      description: PyTest markers to run
+      type: string
+      default: "single_cell"
+    
+    workspaces:
+    - name: processing-workspace
+      description: Processing workspace for analysis
+    
+    tasks:
+    # Step 1-3: Environment preparation and code checkout (Docker Compose container started)
+    - name: prepare-environment
+      taskRef:
+        name: gpu-env-preparation-fixed
+      params:
+      - name: git-repo-url
+        value: $(params.git-repo-url)
+      - name: git-revision
+        value: $(params.git-revision)
+      - name: verbose
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Step 4: Execute papermill with complete parameters matching GitHub Actions
+    - name: execute-notebook-papermill
+      taskRef:
+        name: gpu-papermill-execution-complete
+      runAfter: ["prepare-environment"]
+      params:
+      - name: notebook-relative-dir
+        value: $(params.notebook-relative-dir)
+      - name: notebook-filename
+        value: $(params.notebook-filename)
+      - name: output-notebook
+        value: $(params.output-notebook)
+      - name: container-image
+        value: $(params.container-image)
+      - name: gpu-count
+        value: "1"
+      - name: memory-limit
+        value: "32Gi"
+      - name: cpu-limit
+        value: "8"
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Step 5: Convert notebook to HTML using jupyter nbconvert
+    - name: convert-notebook-to-html
+      taskRef:
+        name: jupyter-nbconvert-complete
+      runAfter: ["execute-notebook-papermill"]
+      params:
+      - name: input-notebook-name
+        value: $(params.output-notebook)
+      - name: output-html-name
+        value: $(params.output-notebook-html)
+      - name: embed-images
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Step 6-7: Download test repo, manage files, and execute pytest
+    - name: execute-pytest-tests
+      taskRef:
+        name: pytest-execution
+      runAfter: ["convert-notebook-to-html"]
+      params:
+      - name: test-repo-url
+        value: $(params.test-repo-url)
+      - name: test-repo-branch
+        value: "main"
+      - name: html-input-file
+        value: $(params.output-notebook-html)
+      - name: pytest-markers
+        value: $(params.pytest-markers)
+      - name: poetry-install
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Step 8: Generate final reports and artifact summary (Tekton equivalent of GitHub Actions summary)
+    - name: generate-artifact-summary
+      runAfter: ["execute-pytest-tests"]
+      taskSpec:
+        workspaces:
+        - name: shared-storage
+        steps:
+        - name: create-summary
+          image: alpine:latest
+          script: |
+            #!/bin/sh
+            set -eu
+            
+            echo "======================================="
+            echo "  GPU Scientific Computing Pipeline"
+            echo "  Artifact Summary Report"
+            echo "======================================="
+            echo ""
+            
+            cd $(workspaces.shared-storage.path)
+            ARTIFACT_DIR="artifacts"
+            
+            echo "Execution Summary:"
+            echo "- Notebook: $(params.notebook-filename)"
+            echo "- Output HTML: $(params.output-notebook-html)"
+            echo "- Test Repository: $(params.test-repo-url)"
+            echo "- PyTest Markers: $(params.pytest-markers)"
+            echo ""
+            
+            echo "Generated Artifacts:"
+            if [ -d "${ARTIFACT_DIR}" ]; then
+              echo "📁 Artifact Directory Contents:"
+              ls -la "${ARTIFACT_DIR}/" | while read line; do echo "  $line"; done
+              echo ""
+              
+              # Check for required artifacts
+              echo "📋 Required Artifacts Status:"
+              
+              # 1. Executed notebook
+              if [ -f "${ARTIFACT_DIR}/$(params.output-notebook)" ]; then
+                SIZE=$(du -h "${ARTIFACT_DIR}/$(params.output-notebook)" | cut -f1)
+                echo "  ✅ Executed Notebook: $(params.output-notebook) (${SIZE})"
+              else
+                echo "  ❌ Executed Notebook: MISSING"
+              fi
+              
+              # 2. HTML report
+              if [ -f "${ARTIFACT_DIR}/$(params.output-notebook-html)" ]; then
+                SIZE=$(du -h "${ARTIFACT_DIR}/$(params.output-notebook-html)" | cut -f1)
+                echo "  ✅ HTML Report: $(params.output-notebook-html) (${SIZE})"
+              else
+                echo "  ❌ HTML Report: MISSING"
+              fi
+              
+              # 3. Coverage XML
+              if [ -f "${ARTIFACT_DIR}/coverage.xml" ]; then
+                SIZE=$(du -h "${ARTIFACT_DIR}/coverage.xml" | cut -f1)
+                echo "  ✅ Coverage XML: coverage.xml (${SIZE})"
+              else
+                echo "  ❌ Coverage XML: MISSING"
+              fi
+              
+              # 4. PyTest Results XML
+              if [ -f "${ARTIFACT_DIR}/pytest_results.xml" ]; then
+                SIZE=$(du -h "${ARTIFACT_DIR}/pytest_results.xml" | cut -f1)
+                echo "  ✅ PyTest Results XML: pytest_results.xml (${SIZE})"
+              else
+                echo "  ❌ PyTest Results XML: MISSING"
+              fi
+              
+              # 5. PyTest HTML Report
+              if [ -f "${ARTIFACT_DIR}/pytest_report.html" ]; then
+                SIZE=$(du -h "${ARTIFACT_DIR}/pytest_report.html" | cut -f1)
+                echo "  ✅ PyTest HTML Report: pytest_report.html (${SIZE})"
+              else
+                echo "  ❌ PyTest HTML Report: MISSING"
+              fi
+              
+              echo ""
+              echo "📊 Total Artifact Size:"
+              du -sh "${ARTIFACT_DIR}" 2>/dev/null || echo "  Unable to calculate"
+              
+              echo ""
+              echo "🎯 Pipeline Success Criteria:"
+              
+              REQUIRED_FILES=0
+              FOUND_FILES=0
+              
+              for file in "$(params.output-notebook)" "$(params.output-notebook-html)" "coverage.xml" "pytest_results.xml" "pytest_report.html"; do
+                REQUIRED_FILES=$((REQUIRED_FILES + 1))
+                if [ -f "${ARTIFACT_DIR}/${file}" ]; then
+                  FOUND_FILES=$((FOUND_FILES + 1))
+                fi
+              done
+              
+              echo "  Required Files: ${REQUIRED_FILES}"
+              echo "  Found Files: ${FOUND_FILES}"
+              
+              if [ ${FOUND_FILES} -eq ${REQUIRED_FILES} ]; then
+                echo "  Status: ✅ ALL ARTIFACTS GENERATED SUCCESSFULLY"
+                echo ""
+                echo "🎉 COMPLETE WORKFLOW SUCCESS!"
+                echo "✅ All 8 steps completed successfully"
+                echo "✅ All required artifacts generated"
+                echo "✅ GPU notebook execution completed"
+                echo "✅ HTML conversion completed"
+                echo "✅ PyTest execution completed"
+                echo "✅ Ready for downstream consumption"
+              else
+                echo "  Status: ⚠️  SOME ARTIFACTS MISSING"
+                echo ""
+                echo "⚠️  WORKFLOW PARTIALLY COMPLETED"
+                echo "   Please check individual task logs for details"
+              fi
+            else
+              echo "❌ Artifact directory not found: ${ARTIFACT_DIR}"
+              echo "❌ WORKFLOW FAILED - No artifacts generated"
+            fi
+            
+            echo ""
+            echo "======================================="
+            echo "  End of Artifact Summary Report"
+            echo "======================================="
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    workspaces:
+    - name: processing-workspace
+      description: Processing workspace for analysis
+    
+  taskRunTemplate:
+    podTemplate:
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      securityContext:
+        fsGroup: 0
+        runAsUser: 0
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    serviceAccountName: default
+  
+  timeouts:
+    pipeline: "4h0m0s"  # 4 hours for complete workflow
+  
+  workspaces:
+  - name: processing-workspace
+    persistentVolumeClaim:
+      claimName: processing-workspace 

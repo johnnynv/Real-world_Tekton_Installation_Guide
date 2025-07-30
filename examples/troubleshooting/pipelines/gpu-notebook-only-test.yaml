@@ -1,0 +1,96 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-notebook-only-test
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-notebook-only-test
+    app.kubernetes.io/component: tekton-pipeline
+    app.kubernetes.io/version: "1.0.0"
+    test-type: "notebook-only"
+spec:
+  pipelineSpec:
+    description: |
+      Simplified test pipeline for notebook execution only.
+      
+      Tests:
+      - Direct notebook execution with RMM handling
+      - Permission fixes (UID 1001)
+      - GPU access verification
+    
+    workspaces:
+    - name: shared-storage
+      description: Shared workspace for notebook execution
+    
+    tasks:
+    # Task 1: Git Clone (inline task)
+    - name: git-clone-simple
+      taskSpec:
+        workspaces:
+        - name: output
+        steps:
+        - name: clone
+          image: alpine/git:latest
+          script: |
+            #!/bin/sh
+            set -eu
+            
+            echo "🚀 Cloning repository..."
+            cd $(workspaces.output.path)
+            
+            # Clean workspace
+            rm -rf * .git* 2>/dev/null || true
+            
+            # Clone repository
+            git clone "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git" .
+            
+            echo "✅ Repository cloned successfully"
+            echo "📋 Contents:"
+            ls -la
+            
+            if [ -d "notebooks" ]; then
+              echo "✅ notebooks/ directory found"
+              ls -la notebooks/ | head -3
+            fi
+      workspaces:
+      - name: output
+        workspace: shared-storage
+    
+    # Task 2: Execute Notebook with RMM Compatibility
+    - name: execute-notebook-rmm-simple
+      taskRef:
+        name: gpu-papermill-execution-production-init
+      runAfter: ["git-clone-simple"]
+      workspaces:
+      - name: shared-storage
+        workspace: shared-storage
+      params:
+      - name: notebook-relative-dir
+        value: "notebooks"
+      - name: notebook-filename
+        value: "01_scRNA_analysis_preprocessing.ipynb"
+      - name: output-notebook
+        value: "01_scRNA_analysis_preprocessing_output.ipynb"
+      - name: container-image
+        value: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  
+  workspaces:
+  - name: shared-storage
+    persistentVolumeClaim:
+      claimName: source-code-workspace
+  
+  taskRunTemplate:
+    serviceAccountName: tekton-pipeline-service
+    podTemplate:
+      securityContext:
+        fsGroup: 1001  # rapids group
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+  
+  timeouts:
+    pipeline: "20m"
+    tasks: "15m" 

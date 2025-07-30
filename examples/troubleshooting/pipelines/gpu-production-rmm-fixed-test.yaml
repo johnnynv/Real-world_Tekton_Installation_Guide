@@ -1,0 +1,77 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-production-rmm-fixed-test
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-production-rmm-fixed-test
+    app.kubernetes.io/component: tekton-pipeline
+    app.kubernetes.io/version: "1.0.0"
+    rmm-compatibility: "fixed"
+spec:
+  pipelineSpec:
+    description: |
+      Test pipeline for RMM-compatibility fixed GPU notebook execution.
+      
+      Validates:
+      - Permission fixes (UID 1001)
+      - RMM compatibility handling
+      - Notebook preprocessing
+      - Complete notebook execution
+    
+    workspaces:
+    - name: shared-storage
+      description: Shared workspace for all pipeline tasks
+    
+    tasks:
+    # Task 1: Environment Preparation (reuse existing)
+    - name: prepare-environment
+      taskRef:
+        name: gpu-env-preparation-task-fixed
+      workspaces:
+      - name: shared
+        workspace: shared-storage
+      params:
+      - name: git-repo-url
+        value: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+    
+    # Task 2: Execute Notebook with RMM Compatibility Fixes
+    - name: execute-notebook-rmm-fixed
+      taskRef:
+        name: gpu-papermill-execution-production-init
+      runAfter: ["prepare-environment"]
+      workspaces:
+      - name: shared-storage
+        workspace: shared-storage
+      params:
+      - name: notebook-relative-dir
+        value: "notebooks"
+      - name: notebook-filename
+        value: "01_scRNA_analysis_preprocessing.ipynb"
+      - name: output-notebook
+        value: "01_scRNA_analysis_preprocessing_output.ipynb"
+      - name: container-image
+        value: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+      - name: enable-rmm-compatibility
+        value: "true"
+  
+  workspaces:
+  - name: shared-storage
+    persistentVolumeClaim:
+      claimName: source-code-workspace
+  
+  taskRunTemplate:
+    serviceAccountName: tekton-pipeline-service
+    podTemplate:
+      securityContext:
+        fsGroup: 1001  # rapids group
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+  
+  timeouts:
+    pipeline: "20m"
+    tasks: "15m" 

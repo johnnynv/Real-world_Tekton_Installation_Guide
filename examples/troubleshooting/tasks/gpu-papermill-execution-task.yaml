@@ -142,9 +142,28 @@ spec:
       
       # Install extra packages from docker-compose if available
       if [ -n "${EXTRA_PIP_PACKAGES:-}" ]; then
-        echo "📦 Installing extra packages: ${EXTRA_PIP_PACKAGES}"
-        pip install --quiet --no-cache-dir ${EXTRA_PIP_PACKAGES} || {
-          echo "⚠️  Some extra packages failed to install, continuing..."
+        echo "📦 Installing critical packages with conda (proven method)..."
+        
+        # Use conda for scanpy (tested and working)
+        conda install -y -c conda-forge -c bioconda scanpy || {
+          echo "⚠️  Conda scanpy installation failed, continuing..."
+        }
+        
+        # Install other packages with pip --user
+        echo "📦 Installing remaining packages with pip..."
+        pip install --user --quiet --no-cache-dir ${EXTRA_PIP_PACKAGES} || {
+          echo "⚠️  Some pip packages failed, continuing..."
+        }
+        
+        # Quick verification
+        echo "🔍 Verifying scanpy installation..."
+        python -c "import scanpy as sc; print('✅ scanpy version:', sc.__version__)" || {
+          echo "❌ scanpy verification failed"
+        }
+        
+        echo "🔍 Verifying other critical packages..."
+        python -c "import cupy as cp; print('✅ cupy working, GPU devices:', cp.cuda.runtime.getDeviceCount())" || {
+          echo "❌ cupy verification failed"
         }
       fi
       

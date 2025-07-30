@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-python-dependency-test
+  namespace: tekton-pipelines
+spec:
+  nodeSelector:
+    accelerator: nvidia-tesla-gpu
+  tolerations:
+  - key: nvidia.com/gpu
+    operator: Exists
+    effect: NoSchedule
+  containers:
+  - name: gpu-test
+    image: nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12
+    command: ["/bin/bash"]
+    args:
+    - -c
+    - |
+      echo "🚀 Starting GPU environment test..."
+      echo "🔍 Checking GPU availability..."
+      nvidia-smi
+      echo ""
+      echo "🐍 Testing Python environment..."
+      which python || which python3 || echo "Python not found in PATH"
+      echo "PATH: $PATH"
+      /opt/conda/bin/python -c "
+      import sys
+      print(f'Python version: {sys.version}')
+      try:
+          import cupy as cp
+          print('✅ CuPy available')
+          print(f'GPU devices: {cp.cuda.runtime.getDeviceCount()}')
+      except ImportError:
+          print('❌ CuPy not available')
+      
+      try:
+          import pandas as pd
+          print('✅ Pandas available')
+      except ImportError:
+          print('❌ Pandas not available')
+      
+      try:
+          import numpy as np
+          print('✅ NumPy available')
+      except ImportError:
+          print('❌ NumPy not available')
+      
+      # Test if we can install scanpy
+      print('🔧 Attempting to install scanpy...')
+      import subprocess
+      result = subprocess.run(['pip', 'install', '--user', 'scanpy'], capture_output=True, text=True)
+      if result.returncode == 0:
+          print('✅ Scanpy installation successful')
+          try:
+              import scanpy as sc
+              print('✅ Scanpy import successful')
+          except ImportError as e:
+              print(f'❌ Scanpy import failed: {e}')
+      else:
+          print(f'❌ Scanpy installation failed: {result.stderr}')
+      "
+      echo ""
+      echo "✅ GPU environment test completed"
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+        memory: 8Gi
+        cpu: 2
+      requests:
+        nvidia.com/gpu: 1
+        memory: 4Gi
+        cpu: 1
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+  restartPolicy: Never 

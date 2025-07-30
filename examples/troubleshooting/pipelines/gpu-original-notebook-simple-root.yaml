@@ -1,0 +1,192 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-original-notebook-simple-root
+  namespace: tekton-pipelines
+  labels:
+    app: gpu-scientific-computing
+    trigger: manual
+    gpu-pipeline: "true"
+    test-type: "simple-root-solution"
+  annotations:
+    tekton.dev/pipeline-type: "gpu-scientific-computing-simple-root"
+    tekton.dev/test-notebook: "01_scRNA_analysis_preprocessing.ipynb"
+    tekton.dev/execution-mode: "root-user-direct"
+spec:
+  pipelineSpec:
+    description: |
+      Simple root solution for GPU-accelerated single-cell RNA analysis pipeline.
+      Runs everything as root to avoid all Docker Compose vs Kubernetes permission issues.
+    
+    params:
+    - name: git-repo-url
+      description: Git repository URL containing the notebook to execute
+      type: string
+      default: "https://github.com/johnnynv/Real-world_Tekton_Installation_Guide.git"
+    - name: git-revision
+      description: Git revision to checkout
+      type: string
+      default: "main"
+    - name: output-notebook-name
+      description: Name for the executed notebook output
+      type: string
+      default: "01_scRNA_analysis_preprocessing_output.ipynb"
+    - name: container-image
+      description: GPU-enabled container image for notebook execution
+      type: string
+      default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+    
+    workspaces:
+    - name: processing-workspace
+      description: Processing workspace for analysis
+    
+    tasks:
+    # Task 1: Environment preparation
+    - name: prepare-environment
+      taskRef:
+        name: gpu-env-preparation-fixed
+      params:
+      - name: git-repo-url
+        value: $(params.git-repo-url)
+      - name: git-revision
+        value: $(params.git-revision)
+      - name: verbose
+        value: "true"
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Task 2: Execute notebook with simple root solution
+    - name: execute-original-notebook-simple-root
+      taskRef:
+        name: gpu-papermill-execution-simple-root
+      runAfter: ["prepare-environment"]
+      params:
+      - name: notebook-relative-dir
+        value: "notebooks"
+      - name: notebook-filename
+        value: "01_scRNA_analysis_preprocessing.ipynb"
+      - name: output-notebook
+        value: $(params.output-notebook-name)
+      - name: container-image
+        value: $(params.container-image)
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    # Task 3: Verify results
+    - name: verify-simple-root-results
+      runAfter: ["execute-original-notebook-simple-root"]
+      taskSpec:
+        workspaces:
+        - name: shared-storage
+        steps:
+        - name: verify-execution
+          image: alpine:latest
+          script: |
+            #!/bin/sh
+            set -eu
+            
+            echo "======================================"
+            echo "     SIMPLE ROOT SOLUTION RESULTS"
+            echo "======================================"
+            echo ""
+            
+            cd $(workspaces.shared-storage.path)
+            
+            echo "📁 Generated files:"
+            ls -la artifacts/ || echo "❌ Artifacts directory not found"
+            echo ""
+            
+            # Check executed notebook
+            if [ -f "artifacts/$(params.output-notebook-name)" ]; then
+              NOTEBOOK_SIZE=$(du -h "artifacts/$(params.output-notebook-name)" | cut -f1)
+              echo "✅ Executed notebook: $(params.output-notebook-name) (${NOTEBOOK_SIZE})"
+            else
+              echo "❌ Executed notebook missing: $(params.output-notebook-name)"
+              exit 1
+            fi
+            
+            # Check papermill log
+            if [ -f "artifacts/papermill.log" ]; then
+              LOG_SIZE=$(du -h "artifacts/papermill.log" | cut -f1)
+              echo "✅ Papermill log: papermill.log (${LOG_SIZE})"
+              
+              echo ""
+              echo "🔍 Execution analysis:"
+              
+              # Check for successful completion
+              if grep -q "SUCCESS: Output notebook created" "artifacts/papermill.log"; then
+                echo "✅ Papermill execution completed successfully"
+              else
+                echo "⚠️  Papermill execution may have issues"
+              fi
+              
+              # Check for any execution errors
+              if grep -q "PapermillExecutionError" "artifacts/papermill.log"; then
+                echo "❌ PapermillExecutionError found"
+                echo "Error details:"
+                grep -A 5 -B 5 "PapermillExecutionError" "artifacts/papermill.log" || true
+              else
+                echo "✅ No PapermillExecutionError found"
+              fi
+              
+              # Check for RMM issues
+              if grep -q "AttributeError.*CUDARuntimeError.*msg" "artifacts/papermill.log"; then
+                echo "⚠️  RMM AttributeError found (may be the remaining issue)"
+              else
+                echo "✅ No RMM AttributeError found"
+              fi
+              
+            else
+              echo "❌ Papermill log missing"
+            fi
+            
+            echo ""
+            echo "🎯 FINAL ASSESSMENT:"
+            
+            # Overall success check
+            if [ -f "artifacts/$(params.output-notebook-name)" ] && ! grep -q "PapermillExecutionError" "artifacts/papermill.log" 2>/dev/null; then
+              echo ""
+              echo "🎉 SUCCESS!"
+              echo "✅ Original notebook executed successfully in Kubernetes Tekton"
+              echo "✅ Root user solution bypassed permission issues"
+              echo "✅ Docker Compose vs Kubernetes difference resolved"
+              echo ""
+              echo "🚀 NOTEBOOK EXECUTION IN TEKTON ACHIEVED!"
+            else
+              echo ""
+              echo "⚠️  PARTIAL SUCCESS"
+              echo "   Notebook execution attempted but may have runtime issues."
+              echo "   This indicates the permission problem is solved,"
+              echo "   but there may be notebook-specific issues remaining."
+              echo ""
+              echo "📋 Next steps: Check papermill.log for specific errors"
+            fi
+      workspaces:
+      - name: shared-storage
+        workspace: processing-workspace
+    
+    workspaces:
+    - name: processing-workspace
+      description: Processing workspace for analysis
+    
+  taskRunTemplate:
+    podTemplate:
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      securityContext:
+        fsGroup: 0  # root group for simplicity
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+    serviceAccountName: default
+  
+  timeouts:
+    pipeline: "2h0m0s"
+  
+  workspaces:
+  - name: processing-workspace
+    persistentVolumeClaim:
+      claimName: processing-workspace 

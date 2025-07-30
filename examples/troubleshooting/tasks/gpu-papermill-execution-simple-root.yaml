@@ -1,0 +1,233 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gpu-papermill-execution-simple-root
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-papermill-execution-simple-root
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  description: |
+    Simplest GPU-accelerated Papermill execution - runs everything as root to avoid permission issues.
+    This directly addresses the Docker Compose vs Kubernetes user permission differences.
+  params:
+  - name: notebook-relative-dir
+    description: Relative directory containing the notebook
+    type: string
+    default: "notebooks"
+  - name: notebook-filename
+    description: Notebook filename to execute
+    type: string
+    default: "01_scRNA_analysis_preprocessing.ipynb"
+  - name: output-notebook
+    description: Name for the output notebook
+    type: string
+    default: "01_scRNA_analysis_preprocessing_output.ipynb"
+  - name: container-image
+    description: Container image to use for execution
+    type: string
+    default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  workspaces:
+  - name: shared-storage
+    description: Shared workspace for input/output files
+    mountPath: /workspace/shared
+  results:
+  - name: execution-status
+    description: Status of papermill execution
+  - name: output-notebook-path
+    description: Path to the executed notebook
+  steps:
+  - name: execute-as-root
+    image: $(params.container-image)
+    computeResources:
+      requests:
+        nvidia.com/gpu: 1
+        memory: 16Gi
+        cpu: 4
+      limits:
+        nvidia.com/gpu: 1
+        memory: 32Gi
+        cpu: 8
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["IPC_LOCK", "SYS_RESOURCE"]
+      runAsNonRoot: false
+      runAsUser: 0  # Run as root - simplest solution
+      runAsGroup: 0
+      seccompProfile:
+        type: RuntimeDefault
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility"
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: NOTEBOOK_RELATIVED_DIR
+      value: $(params.notebook-relative-dir)
+    - name: NOTEBOOK_FILENAME
+      value: $(params.notebook-filename)
+    - name: OUTPUT_NOTEBOOK
+      value: $(params.output-notebook)
+    - name: EXTRA_PIP_PACKAGES
+      value: "anndata==0.11.4 array-api-compat==1.12.0 contourpy==1.3.2 cycler==0.12.1 fonttools==4.58.0 h5py==3.13.0 imageio==2.37.0 joblib==1.5.1 kiwisolver==1.4.8 lazy-loader==0.4 legacy-api-wrap==1.4.1 llvmlite==0.44.0 matplotlib==3.10.3 natsort==8.4.0 networkx==3.4.2 numba==0.61.2 numpy==2.2.6 pandas==2.2.3 patsy==1.0.1 pillow==11.2.1 pynndescent==0.5.13 rapids-singlecell==0.12.6 scanpy==1.11.2 scikit-image==0.25.2 scikit-misc==0.5.1 scipy==1.15.3 seaborn==0.13.2 session-info2==0.1.2 statsmodels==0.14.4 threadpoolctl==3.6.0 tifffile==2025.5.10 tqdm==4.67.1 tzdata==2025.2 umap-learn==0.5.7 wget==3.2 deprecated==1.2.18 numcodecs==0.15.1 wrapt==1.17.2 zarr==2.18.7"
+    - name: HOME
+      value: "/root"
+    - name: PATH
+      value: "/opt/conda/bin:/usr/local/bin:/usr/bin:/bin"
+    volumeMounts:
+    - name: dshm
+      mountPath: /dev/shm
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "======================================"
+      echo "  SIMPLE ROOT SOLUTION"
+      echo "  Direct execution as root user"
+      echo "======================================"
+      echo ""
+      
+      echo "Running as: $(whoami) ($(id))"
+      echo "Target notebook: ${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}"
+      echo "Shared workspace: ${WORKSPACE_SHARED_PATH}"
+      
+      # Apply Docker Compose compatible memory settings
+      echo "Applying Docker Compose compatible memory settings..."
+      ulimit -l unlimited 2>/dev/null || echo "WARNING: Cannot set unlimited memlock"
+      ulimit -s 67108864 2>/dev/null || echo "WARNING: Cannot set stack size"
+      
+      # Setup environment for root user
+      export HOME="/root"
+      export USER="root"
+      export PATH="/opt/conda/bin:/usr/local/bin:/usr/bin:/bin"
+      
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Create necessary directories
+      mkdir -p "${DOCKER_WRITEABLE_DIR}"
+      chmod -R 777 "${DOCKER_WRITEABLE_DIR}" 2>/dev/null || echo "WARNING: Cannot change output permissions"
+      
+      # Verify GPU availability
+      echo "Checking GPU availability..."
+      nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || echo "WARNING: nvidia-smi failed"
+      
+      # Verify notebook exists
+      NOTEBOOK_PATH="${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}"
+      if [ ! -f "${NOTEBOOK_PATH}" ]; then
+        echo "ERROR: Notebook not found: ${NOTEBOOK_PATH}"
+        find . -name "*.ipynb" -type f | head -5
+        exit 1
+      fi
+      
+      echo "Notebook found: ${NOTEBOOK_PATH}"
+      
+      # Setup Python environment using conda directly
+      echo "Setting up Python environment as root..."
+      
+      PYTHON_BIN="/opt/conda/bin/python"
+      PIP_BIN="/opt/conda/bin/pip"
+      CONDA_BIN="/opt/conda/bin/conda"
+      
+      # Verify Python environment
+      echo "Python environment verification:"
+      $PYTHON_BIN --version && echo "Python OK" || (echo "ERROR: Python failed" && exit 1)
+      $PIP_BIN --version && echo "pip OK" || (echo "ERROR: pip failed" && exit 1)
+      $CONDA_BIN --version && echo "conda OK" || (echo "ERROR: conda failed" && exit 1)
+      
+      # Install dependencies directly without permission issues
+      echo "Installing dependencies as root..."
+      $PIP_BIN install --quiet --no-cache-dir papermill ipykernel jupyter || {
+        echo "ERROR: Failed to install papermill"
+        exit 1
+      }
+      
+      # Install additional packages
+      if [ -n "${EXTRA_PIP_PACKAGES:-}" ]; then
+        echo "Installing additional packages..."
+        
+        # Try conda first for scanpy
+        echo "Installing scanpy with conda..."
+        $CONDA_BIN install -y -c conda-forge -c bioconda scanpy || {
+          echo "WARNING: Conda scanpy failed, trying pip..."
+          $PIP_BIN install --quiet --no-cache-dir scanpy || echo "WARNING: scanpy installation failed"
+        }
+        
+        # Install other packages with pip
+        echo "Installing other packages with pip..."
+        $PIP_BIN install --quiet --no-cache-dir ${EXTRA_PIP_PACKAGES} || echo "WARNING: Some pip packages failed"
+        
+        # Verify key packages
+        echo "Verifying package installations..."
+        $PYTHON_BIN -c "import scanpy as sc; print('SUCCESS: scanpy version:', sc.__version__)" || {
+          echo "WARNING: scanpy verification failed, trying direct install..."
+          $PIP_BIN install --force-reinstall scanpy
+          $PYTHON_BIN -c "import scanpy as sc; print('SUCCESS: scanpy version:', sc.__version__)" || echo "WARNING: scanpy still not working"
+        }
+        
+        $PYTHON_BIN -c "import cupy as cp; print('SUCCESS: cupy GPU count:', cp.cuda.runtime.getDeviceCount())" || echo "WARNING: cupy verification failed"
+      fi
+      
+      # Setup GPU environment
+      export CUDA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-"all"}
+      
+      # Execute notebook with EXACT GitHub Actions parameters
+      echo "Executing notebook with Papermill..."
+      PAPERMILL_OUTPUT_PATH="${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}"
+      PAPERMILL_LOG_PATH="${DOCKER_WRITEABLE_DIR}/papermill.log"
+      
+      echo "Command: papermill \"${NOTEBOOK_PATH}\" \"${PAPERMILL_OUTPUT_PATH}\" --log-output --log-level DEBUG --progress-bar --report-mode --kernel python3"
+      
+      # Execute with exact same parameters as GitHub Actions
+      PAPERMILL_EXIT_CODE=0
+      papermill "${NOTEBOOK_PATH}" "${PAPERMILL_OUTPUT_PATH}" \
+          --log-output \
+          --log-level DEBUG \
+          --progress-bar \
+          --report-mode \
+          --kernel python3 2>&1 | tee "${PAPERMILL_LOG_PATH}" || PAPERMILL_EXIT_CODE=$?
+      
+      # Check results
+      if [ $PAPERMILL_EXIT_CODE -ne 0 ]; then
+        echo "ERROR: Papermill execution failed with exit code: $PAPERMILL_EXIT_CODE"
+        echo "Last 20 lines of papermill log:"
+        tail -20 "${PAPERMILL_LOG_PATH}" || true
+        echo -n "failed" > "$(results.execution-status.path)"
+        exit 1
+      fi
+      
+      # Check for execution errors
+      if grep -q "PapermillExecutionError" "${PAPERMILL_LOG_PATH}"; then
+        echo "ERROR: Papermill execution failed - PapermillExecutionError found"
+        echo "Last 20 lines of papermill log:"
+        tail -20 "${PAPERMILL_LOG_PATH}" || true
+        echo -n "failed" > "$(results.execution-status.path)"
+        exit 1
+      fi
+      
+      # Verify output
+      if [ -f "${PAPERMILL_OUTPUT_PATH}" ]; then
+        OUTPUT_SIZE=$(du -h "${PAPERMILL_OUTPUT_PATH}" | cut -f1)
+        echo "SUCCESS: Output notebook created: ${OUTPUT_SIZE}"
+        echo -n "success" > "$(results.execution-status.path)"
+        echo -n "${PAPERMILL_OUTPUT_PATH}" > "$(results.output-notebook-path.path)"
+      else
+        echo "ERROR: Output notebook not found"
+        echo -n "failed" > "$(results.execution-status.path)"
+        exit 1
+      fi
+      
+      echo ""
+      echo "🎉 SIMPLE ROOT SOLUTION COMPLETED!"
+      echo "✅ No permission issues encountered"
+      echo "✅ Notebook executed as root user"
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 1Gi 

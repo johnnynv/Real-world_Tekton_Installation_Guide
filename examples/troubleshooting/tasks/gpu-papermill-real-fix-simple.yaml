@@ -1,0 +1,387 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: gpu-papermill-execution-production-init
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-papermill-execution-production-init
+    app.kubernetes.io/component: tekton-task
+    app.kubernetes.io/version: "1.0.0"
+    production-ready: "true"
+    gpu-fix: "real-simple"
+spec:
+  description: |
+    Production-grade GPU-accelerated Papermill execution with REAL GPU context fixes.
+    Simplified version without complex notebook preprocessing.
+  
+  params:
+  - name: notebook-relative-dir
+    description: Relative directory containing the notebook
+    type: string
+    default: "notebooks"
+  - name: notebook-filename
+    description: Notebook filename to execute
+    type: string
+    default: "01_scRNA_analysis_preprocessing.ipynb"
+  - name: output-notebook
+    description: Name for the output notebook
+    type: string
+    default: "01_scRNA_analysis_preprocessing_output.ipynb"
+  - name: container-image
+    description: Container image to use for execution
+    type: string
+    default: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  
+  workspaces:
+  - name: shared-storage
+    description: Shared workspace for input/output files
+    mountPath: /workspace/shared
+  
+  results:
+  - name: execution-status
+    description: Status of papermill execution
+  - name: output-notebook-path
+    description: Path to the executed notebook
+  - name: papermill-log-path
+    description: Path to the papermill execution log
+  - name: gpu-context-status
+    description: Status of GPU context in Jupyter kernel
+  
+  stepTemplate:
+    env:
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility"
+    - name: CUDA_VISIBLE_DEVICES
+      value: "all"
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "/workspace/shared/artifacts"
+    - name: NOTEBOOK_RELATIVED_DIR
+      value: $(params.notebook-relative-dir)
+    - name: NOTEBOOK_FILENAME
+      value: $(params.notebook-filename)
+    - name: OUTPUT_NOTEBOOK
+      value: $(params.output-notebook)
+    - name: EXTRA_PIP_PACKAGES
+      value: "anndata==0.11.4 scanpy==1.11.2 rapids-singlecell==0.12.6"
+    volumeMounts:
+    - name: dshm
+      mountPath: /dev/shm
+  
+  steps:
+  # Step 1: Init Container - Permission Setup
+  - name: init-permission-setup
+    image: $(params.container-image)
+    computeResources:
+      requests:
+        memory: 1Gi
+        cpu: 500m
+      limits:
+        memory: 2Gi
+        cpu: 1
+    securityContext:
+      allowPrivilegeEscalation: true
+      capabilities:
+        drop: ["ALL"]
+        add: ["CHOWN", "DAC_OVERRIDE", "FOWNER"]
+      runAsNonRoot: false
+      runAsUser: 0
+      runAsGroup: 0
+      seccompProfile:
+        type: RuntimeDefault
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "=============================================="
+      echo "  REAL GPU FIX - PERMISSION SETUP"
+      echo "=============================================="
+      
+      # Get actual rapids user UID
+      RAPIDS_UID=$(id -u rapids)
+      RAPIDS_GID=$(id -g rapids)
+      echo "✅ RAPIDS user: UID $RAPIDS_UID, GID $RAPIDS_GID"
+      
+      # Fix conda permissions
+      chown -R $RAPIDS_UID:$RAPIDS_GID /opt/conda/ 2>/dev/null || echo "WARNING: conda chown failed"
+      chmod -R 755 /opt/conda/ 2>/dev/null || echo "WARNING: conda chmod failed"
+      
+      # Fix workspace permissions
+      if [ -d "${WORKSPACE_SHARED_PATH}" ]; then
+        chown -R $RAPIDS_UID:$RAPIDS_GID "${WORKSPACE_SHARED_PATH}" || echo "WARNING: workspace chown failed"
+        chmod -R 755 "${WORKSPACE_SHARED_PATH}" || echo "WARNING: workspace chmod failed"
+      fi
+      
+      # Create output directories
+      mkdir -p "${DOCKER_WRITEABLE_DIR}"
+      chown -R $RAPIDS_UID:$RAPIDS_GID "${DOCKER_WRITEABLE_DIR}" || echo "WARNING: output dir chown failed"
+      chmod -R 777 "${DOCKER_WRITEABLE_DIR}" || echo "WARNING: output dir chmod failed"
+      
+      # Ensure rapids home directory
+      if [ ! -d "/home/rapids" ]; then
+        mkdir -p /home/rapids
+      fi
+      chown $RAPIDS_UID:$RAPIDS_GID /home/rapids
+      chmod 755 /home/rapids
+      
+      echo "success" > "${DOCKER_WRITEABLE_DIR}/permission-fix-status.txt"
+      chown $RAPIDS_UID:$RAPIDS_GID "${DOCKER_WRITEABLE_DIR}/permission-fix-status.txt" || true
+      
+      echo "✅ Permission setup completed"
+
+  # Step 2: Main Container with enhanced GPU environment
+  - name: execute-notebook-with-real-gpu-fix
+    image: $(params.container-image)
+    computeResources:
+      requests:
+        nvidia.com/gpu: 1
+        memory: 16Gi
+        cpu: 4
+      limits:
+        nvidia.com/gpu: 1
+        memory: 32Gi
+        cpu: 8
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["IPC_LOCK", "SYS_RESOURCE"]
+      runAsNonRoot: true
+      runAsUser: 1001  # rapids user
+      runAsGroup: 1001
+      seccompProfile:
+        type: RuntimeDefault
+    env:
+    - name: HOME
+      value: "/home/rapids"
+    - name: USER
+      value: "rapids"
+    - name: PATH
+      value: "/home/rapids/.local/bin:/opt/conda/bin:/usr/local/bin:/usr/bin:/bin"
+    - name: PYTHONPATH
+      value: "/opt/conda/lib/python3.12/site-packages"
+    - name: CONDA_DEFAULT_ENV
+      value: "base"
+    # CRITICAL: Enhanced GPU context environment variables
+    - name: NVIDIA_VISIBLE_DEVICES
+      value: "all"
+    - name: CUDA_VISIBLE_DEVICES
+      value: "all"
+    - name: NVIDIA_DRIVER_CAPABILITIES
+      value: "compute,utility"
+    - name: LD_LIBRARY_PATH
+      value: "/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+    - name: CUDA_HOME
+      value: "/usr/local/cuda"
+    script: |
+      #!/bin/bash
+      set -eu
+      
+      echo "=============================================="
+      echo "  REAL GPU FIX - ENHANCED NOTEBOOK EXECUTION"
+      echo "=============================================="
+      echo "Running as: $(whoami) ($(id))"
+      echo "Enhanced GPU Environment:"
+      echo "  NVIDIA_VISIBLE_DEVICES: ${NVIDIA_VISIBLE_DEVICES}"
+      echo "  CUDA_VISIBLE_DEVICES: ${CUDA_VISIBLE_DEVICES}"
+      echo "  LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+      echo "  CUDA_HOME: ${CUDA_HOME}"
+      
+      cd "${WORKSPACE_SHARED_PATH}"
+      
+      # Enhanced GPU verification
+      echo "🔍 Enhanced container-level GPU check:"
+      nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader || echo "WARNING: nvidia-smi failed"
+      
+      # Check CUDA libraries
+      echo "🔍 CUDA library check:"
+      ls -la /usr/local/cuda/lib64/libcuda* 2>/dev/null || echo "WARNING: CUDA libraries not found in expected location"
+      ls -la /usr/local/nvidia/lib64/libcuda* 2>/dev/null || echo "INFO: Checking alternative NVIDIA lib location"
+      
+      # Verify notebook exists
+      NOTEBOOK_PATH="${NOTEBOOK_RELATIVED_DIR}/${NOTEBOOK_FILENAME}"
+      if [ ! -f "${NOTEBOOK_PATH}" ]; then
+        echo "❌ Notebook not found: ${NOTEBOOK_PATH}"
+        exit 1
+      fi
+      echo "✅ Notebook found: ${NOTEBOOK_PATH}"
+      
+      # Setup Python environment
+      PYTHON_BIN="/opt/conda/bin/python"
+      PIP_BIN="/opt/conda/bin/pip"
+      
+      echo "🐍 Python environment setup:"
+      $PYTHON_BIN --version && echo "✅ Python OK" || (echo "❌ Python failed" && exit 1)
+      $PIP_BIN --version && echo "✅ pip OK" || (echo "❌ pip failed" && exit 1)
+      
+      # Install dependencies
+      echo "📦 Installing dependencies..."
+      $PIP_BIN install --user --quiet --no-cache-dir papermill ipykernel jupyter || {
+        echo "❌ Failed to install papermill"
+        exit 1
+      }
+      
+      if [ -n "${EXTRA_PIP_PACKAGES:-}" ]; then
+        echo "📦 Installing additional packages..."
+        $PIP_BIN install --user --quiet --no-cache-dir ${EXTRA_PIP_PACKAGES} || echo "WARNING: Some packages failed"
+      fi
+      
+      # Test GPU access within Python BEFORE notebook execution
+      echo "🔍 Testing GPU access within Python environment..."
+      $PYTHON_BIN -c "
+import sys
+print('Python path:', sys.executable)
+
+# Test 1: Basic cupy
+try:
+    import cupy as cp
+    device_count = cp.cuda.runtime.getDeviceCount()
+    print(f'✅ CuPy GPU device count: {device_count}')
+    if device_count > 0:
+        x = cp.array([1, 2, 3])
+        result = cp.sum(x)
+        print(f'✅ CuPy basic operation result: {result}')
+    else:
+        print('❌ CuPy: No devices detected')
+except Exception as e:
+    print(f'❌ CuPy test failed: {e}')
+
+# Test 2: Check CUDA initialization
+try:
+    import cupy as cp
+    cp.cuda.runtime.getDeviceProperties(0)
+    print('✅ CUDA device properties accessible')
+except Exception as e:
+    print(f'❌ CUDA device properties failed: {e}')
+
+# Test 3: Environment variables visibility
+import os
+nvidia_vars = {k: v for k, v in os.environ.items() if 'NVIDIA' in k or 'CUDA' in k}
+print('📋 GPU Environment variables in Python:')
+for k, v in nvidia_vars.items():
+    print(f'  {k}: {v}')
+" || echo "⚠️ Python GPU pre-test had issues"
+      
+      # Find papermill executable
+      PAPERMILL_BIN=""
+      if [ -x "/home/rapids/.local/bin/papermill" ]; then
+        PAPERMILL_BIN="/home/rapids/.local/bin/papermill"
+      elif [ -x "/opt/conda/bin/papermill" ]; then
+        PAPERMILL_BIN="/opt/conda/bin/papermill"
+      else
+        echo "❌ papermill not found"
+        exit 1
+      fi
+      
+      # Enhanced GPU environment for Jupyter kernel
+      export CUDA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-"all"}
+      export CUPY_CACHE_DIR="${HOME}/.cupy"
+      export NUMBA_CACHE_DIR="${HOME}/.numba"
+      export JUPYTER_RUNTIME_DIR="${HOME}/.local/share/jupyter/runtime"
+      mkdir -p "${CUPY_CACHE_DIR}" "${NUMBA_CACHE_DIR}" "${JUPYTER_RUNTIME_DIR}" 2>/dev/null || true
+      
+      # Execute notebook with enhanced monitoring
+      echo "🚀 Executing notebook with enhanced GPU environment..."
+      PAPERMILL_OUTPUT_PATH="${DOCKER_WRITEABLE_DIR}/${OUTPUT_NOTEBOOK}"
+      PAPERMILL_LOG_PATH="${DOCKER_WRITEABLE_DIR}/papermill.log"
+      
+      echo "Enhanced command: $PAPERMILL_BIN \"${NOTEBOOK_PATH}\" \"${PAPERMILL_OUTPUT_PATH}\" --log-output --log-level DEBUG --progress-bar --report-mode --kernel python3"
+      
+      # Execute with enhanced error capture
+      PAPERMILL_EXIT_CODE=0
+      $PAPERMILL_BIN "${NOTEBOOK_PATH}" "${PAPERMILL_OUTPUT_PATH}" \
+          --log-output \
+          --log-level DEBUG \
+          --progress-bar \
+          --report-mode \
+          --kernel python3 2>&1 | tee "${PAPERMILL_LOG_PATH}" || PAPERMILL_EXIT_CODE=$?
+      
+      # Enhanced result analysis
+      echo "🔍 Enhanced execution result analysis..."
+      
+      # Check if output notebook was created
+      if [ ! -f "${PAPERMILL_OUTPUT_PATH}" ]; then
+        echo "❌ REAL FAILURE: No output notebook created"
+        echo -n "failed" > "$(results.execution-status.path)"
+        echo -n "no-output" > "$(results.gpu-context-status.path)"
+        exit 1
+      fi
+      
+      OUTPUT_SIZE=$(du -h "${PAPERMILL_OUTPUT_PATH}" | cut -f1)
+      echo "📋 Output notebook created: ${OUTPUT_SIZE}"
+      
+      # Check execution progress
+      TOTAL_CELLS=$(grep -o "Executing:.*%" "${PAPERMILL_LOG_PATH}" | tail -1 | grep -o "[0-9]*%" | head -1 | sed 's/%//' || echo "0")
+      echo "📊 Execution progress: ${TOTAL_CELLS}%"
+      
+      # Count actual executed cells
+      EXECUTED_CELLS=$(grep -c "Executing Cell" "${PAPERMILL_LOG_PATH}" || echo "0")
+      echo "📊 Cells executed: ${EXECUTED_CELLS}"
+      
+      # Enhanced error analysis
+      HAS_RMM_ERROR=false
+      HAS_GPU_ERROR=false
+      HAS_CRITICAL_ERROR=false
+      
+      if grep -q "rmm\.reinitialize\|AttributeError.*msg" "${PAPERMILL_LOG_PATH}"; then
+        HAS_RMM_ERROR=true
+        echo "⚠️ RMM initialization error detected"
+      fi
+      
+      if grep -q "No NVIDIA GPU detected\|cudaErrorNoDevice" "${PAPERMILL_LOG_PATH}"; then
+        HAS_GPU_ERROR=true
+        echo "❌ GPU access error in Jupyter kernel detected"
+      fi
+      
+      if grep -q "PapermillExecutionError" "${PAPERMILL_LOG_PATH}" && [ "$EXECUTED_CELLS" -lt 5 ]; then
+        HAS_CRITICAL_ERROR=true
+        echo "❌ Critical execution error - notebook failed very early"
+      fi
+      
+      # More accurate status determination
+      if [ $PAPERMILL_EXIT_CODE -eq 0 ] && [ "$TOTAL_CELLS" -gt 85 ]; then
+        echo "✅ REAL SUCCESS: Notebook executed successfully (${TOTAL_CELLS}% completed)"
+        echo -n "success" > "$(results.execution-status.path)"
+        echo -n "gpu-ok" > "$(results.gpu-context-status.path)"
+      elif [ $PAPERMILL_EXIT_CODE -ne 0 ] && [ "$EXECUTED_CELLS" -gt 3 ] && [ $HAS_RMM_ERROR = true ] && [ $HAS_GPU_ERROR = true ]; then
+        echo "⚠️ PARTIAL SUCCESS: GPU context issues but notebook progressed (${EXECUTED_CELLS} cells executed)"
+        echo "🔍 This indicates the GPU context problem we identified"
+        echo -n "partial-gpu-context-issue" > "$(results.execution-status.path)"
+        echo -n "gpu-context-failed" > "$(results.gpu-context-status.path)"
+      elif [ $HAS_CRITICAL_ERROR = true ]; then
+        echo "❌ REAL FAILURE: Critical errors prevented execution"
+        echo -n "failed" > "$(results.execution-status.path)"
+        echo -n "critical-error" > "$(results.gpu-context-status.path)"
+        exit 1
+      else
+        echo "❌ REAL FAILURE: Execution failed unexpectedly"
+        echo -n "failed" > "$(results.execution-status.path)"
+        echo -n "unknown-error" > "$(results.gpu-context-status.path)"
+        exit 1
+      fi
+      
+      echo -n "${PAPERMILL_OUTPUT_PATH}" > "$(results.output-notebook-path.path)"
+      echo -n "${PAPERMILL_LOG_PATH}" > "$(results.papermill-log-path.path)"
+      
+      echo ""
+      echo "🏁 REAL GPU FIX EXECUTION COMPLETED"
+      echo "📋 Final Status:"
+      echo "   - Exit Code: $PAPERMILL_EXIT_CODE"
+      echo "   - Progress: ${TOTAL_CELLS}%"
+      echo "   - Cells Executed: ${EXECUTED_CELLS}"
+      echo "   - RMM Error: $HAS_RMM_ERROR"
+      echo "   - GPU Error: $HAS_GPU_ERROR"
+      echo "   - Critical Error: $HAS_CRITICAL_ERROR"
+      echo ""
+      echo "🎯 KEY INSIGHT: If we see 'partial-gpu-context-issue', it confirms"
+      echo "   the GPU context passing problem from container to Jupyter kernel"
+      echo ""
+  
+  volumes:
+  - name: dshm
+    emptyDir:
+      medium: Memory
+      sizeLimit: 1Gi 

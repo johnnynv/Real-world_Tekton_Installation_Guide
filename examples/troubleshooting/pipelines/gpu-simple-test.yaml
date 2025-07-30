@@ -1,0 +1,37 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: gpu-simple-test
+  namespace: tekton-pipelines
+  labels:
+    app.kubernetes.io/name: gpu-simple-test
+    app.kubernetes.io/component: tekton-pipeline
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  pipelineSpec:
+    description: |
+      Simple GPU detection test pipeline to diagnose container-level GPU access.
+    
+    tasks:
+    - name: gpu-detection-test
+      taskRef:
+        name: gpu-simple-test
+      params:
+      - name: container-image
+        value: "nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12"
+  
+  taskRunTemplate:
+    serviceAccountName: tekton-pipeline-service
+    podTemplate:
+      securityContext:
+        fsGroup: 1001  # rapids group
+      nodeSelector:
+        accelerator: nvidia-tesla-gpu
+      tolerations:
+      - key: nvidia.com/gpu
+        operator: Exists
+        effect: NoSchedule
+  
+  timeouts:
+    pipeline: "10m"
+    tasks: "5m" 
