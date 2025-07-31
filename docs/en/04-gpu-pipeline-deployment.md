@@ -56,6 +56,8 @@ The project has been organized into a clear directory structure:
 
 ```
 examples/
+├── basic/                    # Basic examples
+├── development/              # Development environment(testing, debug)  
 ├── production/          # Production-ready files
 │   ├── pipelines/       # Main workflows
 │   ├── tasks/          # Core task definitions

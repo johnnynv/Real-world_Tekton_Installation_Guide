@@ -79,6 +79,11 @@ spec:
       value: $(params.max-retries)
     - name: VERBOSE
       value: $(params.verbose)
+    - name: GITHUB_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: github-token-secret
+          key: token
     script: |
       #!/bin/sh
       set -eu
@@ -176,18 +181,26 @@ spec:
       perform_git_clone() {
         local target_dir="$1"
         local attempt=1
+        local auth_url="${REPO_URL}"
+        
+        # Setup authenticated URL if GitHub token is provided
+        if [ -n "${GITHUB_TOKEN}" ] && [ "${GITHUB_TOKEN}" != "" ]; then
+          log "🔐 Using GitHub token for authentication"
+          # Convert https://github.com/user/repo.git to https://token@github.com/user/repo.git
+          auth_url=$(echo "${REPO_URL}" | sed "s#https://github.com/#https://${GITHUB_TOKEN}@github.com/#")
+        fi
         
         while [ ${attempt} -le ${MAX_RETRIES} ]; do
           log "🔄 Clone attempt ${attempt}/${MAX_RETRIES}"
           
           # Perform the clone
           if [ "${VERBOSE}" = "true" ]; then
-            if git clone --verbose "${REPO_URL}" "${target_dir}"; then
+            if git clone --verbose "${auth_url}" "${target_dir}"; then
               log "✅ Git clone successful on attempt ${attempt}"
               return 0
             fi
           else
-            if git clone "${REPO_URL}" "${target_dir}" 2>&1; then
+            if git clone "${auth_url}" "${target_dir}" 2>&1; then
               log "✅ Git clone successful on attempt ${attempt}"
               return 0
             fi
@@ -277,6 +290,9 @@ spec:
           rollback_on_failure
           return 1
         fi
+        
+        # Return to workspace root before validation
+        cd "${WORKSPACE_PATH}"
         
         # Step 4: Validate repository
         if ! validate_repository "${TARGET_DIR}"; then

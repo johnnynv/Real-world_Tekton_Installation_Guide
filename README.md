@@ -1,224 +1,123 @@
-# Tekton GPU Scientific Computing Pipeline
+# Real-world Tekton Installation Guide
 
-Complete migration guide and implementation for moving GitHub Actions GPU scientific computing workflows to Tekton.
+一个经过实战验证的 Tekton 完整安装指南，支持 kubeadm 环境，包含生产级配置。
 
-## 🎯 Project Overview
+## ✅ 已完成功能
 
-This project provides a complete solution for migrating GPU-accelerated scientific computing workflows from GitHub Actions to Tekton on Kubernetes. It includes all necessary configurations, documentation, and automation scripts for a seamless transition.
+### 🏗️ 步骤1：Tekton 核心安装 (已完成)
+- ✅ **Tekton Pipelines** 核心引擎安装
+- ✅ **Tekton Dashboard** Web界面安装  
+- ✅ **Pod Security Standards** 配置 (Kubernetes 1.24+)
+- ✅ **Nginx Ingress Controller** 生产级访问
+- ✅ **域名访问配置** (tekton.<IP>.nip.io)
+- ✅ **HTTPS 支持** (自签名证书，标准443端口)
+- ✅ **完整验证脚本** 
 
-### Original GitHub Actions Workflow
-- Docker Compose GPU container startup
-- Papermill Jupyter Notebook execution
-- HTML conversion with jupyter nbconvert
-- PyTest execution with test repository
-- Artifact generation (coverage.xml, pytest_results.xml, pytest_report.html)
+### 🚀 快速开始
 
-### New Tekton Pipeline
-- GPU-accelerated Tekton Tasks
-- Kubernetes-native workflow orchestration
-- GitHub Webhook integration
-- Identical output artifacts
-
-## 📁 Project Structure
-
-```
-Real-world_Tekton_Installation_Guide/
-├── docs/                                    # Documentation
-│   ├── zh/                                  # Chinese documentation
-│   │   ├── 01-tekton-installation.md        # Tekton installation
-│   │   ├── 02-tekton-triggers-setup.md      # Triggers configuration
-│   │   ├── 03-tekton-webhook-configuration.md # Webhook setup
-│   │   └── 04-gpu-pipeline-deployment.md    # GPU pipeline deployment
-│   └── en/                                  # English documentation
-│       ├── 01-tekton-installation.md
-│       ├── 02-tekton-triggers-setup.md
-│       ├── 03-tekton-webhook-configuration.md
-│       └── 04-gpu-pipeline-deployment.md
-├── examples/                                # Tekton configurations
-│   ├── tasks/                              # Task definitions
-│   │   ├── gpu-env-preparation-task.yaml
-│   │   ├── gpu-env-preparation-task-fixed.yaml    # Fixed version for workspace issues
-│   │   ├── gpu-papermill-execution-task.yaml
-│   │   ├── jupyter-nbconvert-task.yaml
-│   │   └── pytest-execution-task.yaml
-│   ├── pipelines/                          # Pipeline definitions
-│   │   ├── gpu-scientific-computing-pipeline.yaml
-│   │   └── gpu-complete-pipeline-fixed.yaml       # Fixed version of complete pipeline
-│   ├── triggers/                           # Trigger configurations
-│   │   ├── gpu-pipeline-rbac.yaml
-│   │   └── gpu-pipeline-trigger-template.yaml
-│   ├── dashboard/                          # Dashboard configurations
-│   │   └── tekton-dashboard-ingress-production.yaml
-│   ├── workspaces/                         # Workspace configurations
-│   │   └── gpu-pipeline-workspaces.yaml   # PVC workspace configurations
-│   ├── runs/                               # Manual run examples
-│   │   └── gpu-pipeline-manual-run.yaml   # Manual pipeline run example
-│   ├── debug/                              # Debug utilities
-│   │   ├── debug-workspace-test.yaml       # Workspace functionality test
-│   │   └── debug-git-clone-test.yaml       # Git clone functionality test
-│   └── testing/                            # Testing utilities
-│       ├── gpu-test-pod.yaml               # GPU hardware access test
-│       ├── gpu-env-test-fixed.yaml         # Environment preparation task test
-│       ├── gpu-papermill-debug-test.yaml   # GPU papermill debug test
-│       ├── gpu-papermill-notebook-test.yaml # Papermill notebook execution test
-│       └── gpu-pipeline-test-simple.yaml   # Simplified pipeline test
-├── scripts/                                # Deployment scripts
-│   ├── deploy-complete-pipeline.sh         # One-click deployment
-│   ├── execute-gpu-pipeline.sh             # Manual execution script
-│   ├── validate-gpu-pipeline.sh            # End-to-end validation script
-│   ├── verify-deployment.sh               # Deployment verification
-│   ├── install/                           # Installation scripts
-│   ├── cleanup/                           # Cleanup scripts
-│   └── utils/                             # Utility scripts
-├── notebooks/                              # Sample notebooks
-│   └── 01_scRNA_analysis_preprocessing.ipynb
-└── docker-compose/                        # Original Docker setup
-    └── docker-compose-nb-2504.yaml
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-- Kubernetes cluster with GPU support
-- kubectl configured and connected
-- NVIDIA GPU Operator installed
-- GitHub repository with Jupyter notebooks
-
-### One-Click Deployment
-
+#### 1. 克隆项目
 ```bash
-chmod +x scripts/deploy-complete-pipeline.sh
-./scripts/deploy-complete-pipeline.sh
+git clone https://github.com/your-repo/Real-world_Tekton_Installation_Guide.git
+cd Real-world_Tekton_Installation_Guide
 ```
 
-### Verify Deployment
-
+#### 2. 配置 kubectl (kubeadm 环境)
 ```bash
-chmod +x scripts/verify-deployment.sh
-./scripts/verify-deployment.sh
+mkdir -p ~/.kube
+sudo cp /etc/kubernetes/admin.conf ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
 ```
 
-### Step-by-Step Deployment
-
-1. **Install Tekton Core Components**
-   - Follow: `docs/en/01-tekton-installation.md` or `docs/zh/01-tekton-installation.md`
-
-2. **Configure Tekton Triggers**
-   - Follow: `docs/en/02-tekton-triggers-setup.md` or `docs/zh/02-tekton-triggers-setup.md`
-
-3. **Setup GitHub Webhooks**
-   - Follow: `docs/en/03-tekton-webhook-configuration.md` or `docs/zh/03-tekton-webhook-configuration.md`
-
-4. **Deploy GPU Pipeline**
-   - Follow: `docs/en/04-gpu-pipeline-deployment.md` or `docs/zh/04-gpu-pipeline-deployment.md`
-
-## 🔧 Pipeline Components
-
-### Tasks
-- **gpu-env-preparation**: Environment setup and code checkout
-- **gpu-papermill-execution**: GPU-accelerated notebook execution
-- **jupyter-nbconvert**: Notebook to HTML conversion
-- **pytest-execution**: Test execution and reporting
-
-### Pipeline Flow
-1. Environment preparation → 2. GPU notebook execution → 3. HTML conversion → 4. Test execution
-
-### Triggers
-- GitHub push events to main/develop branches
-- Commit messages containing [gpu] or [notebook] tags
-- File changes in notebooks/ directory
-
-## 📊 Dashboard Access
-
-After deployment, access the Tekton Dashboard:
+#### 3. 安装 Tekton 核心组件
 ```bash
-# Get Dashboard URL
-kubectl get svc tekton-dashboard -n tekton-pipelines
+# 按照文档步骤执行
+cat docs/zh/01-tekton-installation.md
 ```
 
-View your Pipeline executions, Tasks, and real-time logs through the web interface.
-
-## 🔗 GitHub Webhook Configuration
-
-The deployment script will provide webhook configuration details:
-- **Payload URL**: Your EventListener service endpoint
-- **Content Type**: application/json
-- **Secret**: Generated automatically and saved to webhook-secret.txt
-- **Events**: Push events
-
-## 📋 Generated Artifacts
-
-The pipeline generates the same artifacts as the original GitHub Actions:
-- `executed_notebook.ipynb` - Executed notebook
-- `executed_notebook.html` - HTML report
-- `coverage.xml` - Code coverage report
-- `pytest_results.xml` - JUnit test results
-- `pytest_report.html` - HTML test report
-
-## 🔍 Monitoring and Verification
-
-### Check Pipeline Status
+#### 4. 访问 Dashboard
 ```bash
-# List all pipeline runs
-kubectl get pipelineruns -n tekton-pipelines
-
-# View specific run details
-kubectl describe pipelinerun <name> -n tekton-pipelines
-
-# View logs
-kubectl logs -f <pod-name> -n tekton-pipelines
+# 获取访问地址
+NODE_IP=$(hostname -I | awk '{print $1}')
+echo "🌐 Dashboard: https://tekton.$NODE_IP.nip.io"
+echo "   (使用标准443端口，HTTP自动重定向)"
 ```
 
-### GPU Resource Monitoring
+### 📁 项目结构
+```
+├── docs/
+│   ├── zh/                    # 中文文档  
+│   │   ├── 01-tekton-installation.md      ✅ 已完成
+│   │   ├── 02-tekton-triggers-setup.md    📋 待完成
+│   │   ├── 03-tekton-webhook-configuration.md  📋 待完成  
+│   │   └── 04-gpu-pipeline-deployment.md  📋 待完成
+│   └── en/                    # 英文文档
+│       ├── 01-tekton-installation.md      ✅ 已同步
+│       └── ...
+├── scripts/
+│   ├── utils/
+│   │   └── verify-step1-installation.sh   ✅ 验证脚本
+│   ├── install/               # 自动化安装脚本
+│   └── cleanup/               # 环境清理脚本
+└── examples/                  # 示例配置文件
+    ├── basic/                 # 基础示例(pipelines, tasks, triggers, workspaces, dashboard)
+    ├── development/           # 开发环境(testing, debug)
+    ├── production/            # 生产环境配置
+    ├── troubleshooting/       # 故障排除示例
+    └── runs/                  # Pipeline运行示例
+```
+
+### 🎯 特色功能
+
+#### ✅ 生产级配置
+- **kubeadm 环境支持**: 完整的 kubectl 配置指南
+- **Pod Security Standards**: 自动解决 Kubernetes 1.24+ 安全策略问题
+- **域名访问**: 使用 nip.io 无需 DNS 配置
+- **HTTPS 支持**: 自签名证书配置
+
+#### ✅ 验证机制
+- **自动化验证**: 一键检查所有组件状态
+- **实际测试**: TaskRun 执行验证
+- **访问验证**: Dashboard 界面功能确认
+
+#### ✅ 文档质量
+- **步骤精简**: 去除冗余，保留核心验证步骤
+- **双语支持**: 中英文文档同步更新
+- **实战验证**: 每个步骤都经过实际环境测试
+
+### 🔧 环境要求
+- **Kubernetes**: v1.24+ (kubeadm/minikube/云厂商)
+- **节点配置**: 2CPU, 4GB RAM (最低要求)
+- **网络**: 能访问 storage.googleapis.com
+- **权限**: sudo 权限 (配置 kubectl)
+
+### 📊 验证结果示例
 ```bash
-# Check GPU nodes
-kubectl get nodes -l accelerator=nvidia-tesla-gpu
+🔍 验证 Tekton 步骤1 安装...
+================================
+1. 检查 Tekton 命名空间...          ✅
+2. 检查 Pod Security Standards 配置... ✅  
+3. 检查 Tekton Pipelines 组件...   ✅
+4. 检查 Tekton Dashboard...        ✅
+5. 检查 Tekton CRDs...            ✅
+6. 检查测试 Task...               ✅
+7. 检查 Dashboard 访问配置...       ✅
 
-# Monitor GPU usage during execution
-kubectl exec -it <gpu-pod> -n tekton-pipelines -- nvidia-smi
+🌐 HTTP访问: http://tekton.10.34.2.129.nip.io (自动重定向)
+🔒 HTTPS访问: https://tekton.10.34.2.129.nip.io (标准443端口)
+================================
+✅ Tekton 步骤1 验证完成！
 ```
 
-## 🔧 Troubleshooting
+### 🗺️ 后续规划
+- [ ] **步骤2**: Tekton Triggers 安装配置
+- [ ] **步骤3**: GitHub Webhook 集成  
+- [ ] **步骤4**: GPU Pipeline 部署
+- [ ] **生产优化**: 高可用、监控、备份方案
 
-### Common Issues
-1. **GPU Scheduling**: Ensure nodes are labeled with GPU accelerator
-2. **Webhook Failures**: Check EventListener logs and GitHub webhook delivery
-3. **Task Failures**: Review individual task logs for specific errors
-
-### Log Collection
-```bash
-# EventListener logs
-kubectl logs -l app.kubernetes.io/component=eventlistener -n tekton-pipelines
-
-# Pipeline execution logs
-kubectl logs -l tekton.dev/pipeline=gpu-scientific-computing-pipeline -n tekton-pipelines
-```
-
-## 📚 Documentation
-
-- **Installation Guide**: Complete Tekton setup instructions
-- **Configuration Guide**: Triggers and webhook configuration
-- **Deployment Guide**: GPU pipeline deployment steps
-- **Troubleshooting**: Common issues and solutions
-
-All documentation is available in both English (`docs/en/`) and Chinese (`docs/zh/`).
-
-## 🤝 Contributing
-
-This project provides a complete reference implementation. Customize the Tasks, Pipeline, and configurations according to your specific requirements.
-
-## 📄 License
-
-See LICENSE file for details.
+### 📞 支持
+- **问题反馈**: 通过 GitHub Issues
+- **文档改进**: 欢迎 Pull Request
+- **技术讨论**: 参考 troubleshooting.md
 
 ---
-
-## 🎉 Success Metrics
-
-After successful deployment:
-- ✅ Tekton Dashboard accessible
-- ✅ GPU pipeline visible in Dashboard
-- ✅ GitHub webhooks triggering pipeline runs
-- ✅ Notebook execution on GPU resources
-- ✅ Test artifacts generated successfully
-- ✅ Complete CI/CD automation achieved
+**注意**: 当前仅完成步骤1，为后续步骤奠定了坚实基础。每个步骤都经过实际环境验证，确保可重现性。

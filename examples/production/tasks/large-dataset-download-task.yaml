@@ -42,10 +42,20 @@ spec:
     description: Timeout in seconds for each download
     type: string
     default: "3600"
+  - name: github-token
+    description: GitHub personal access token for private repositories (optional)
+    type: string
+    default: ""
   
   steps:
   - name: download-datasets
     image: python:3.11-slim
+    env:
+    - name: GITHUB_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: github-token-secret
+          key: token
     script: |
       #!/bin/bash
       set -eu
@@ -100,12 +110,24 @@ spec:
         else
           echo "📥 Downloading: $url"
           
-          # Download with progress and retry
-          if command -v aria2c >/dev/null; then
+                  # Download with progress and retry (with GitHub token support)
+        if command -v aria2c >/dev/null; then
+          if [ -n "$GITHUB_TOKEN" ] && [[ "$url" == *"github.com"* ]]; then
+            echo "🔐 Using GitHub token for authenticated download"
+            aria2c --continue=true --max-tries=3 --retry-wait=10 --timeout=$(params.download-timeout) \
+              --header="Authorization: token $GITHUB_TOKEN" -o "$CACHE_PATH" "$url"
+          else
             aria2c --continue=true --max-tries=3 --retry-wait=10 --timeout=$(params.download-timeout) -o "$CACHE_PATH" "$url"
+          fi
+        else
+          if [ -n "$GITHUB_TOKEN" ] && [[ "$url" == *"github.com"* ]]; then
+            echo "🔐 Using GitHub token for authenticated download"
+            wget --timeout=$(params.download-timeout) --tries=3 --progress=bar:force \
+              --header="Authorization: token $GITHUB_TOKEN" -O "$CACHE_PATH" "$url"
           else
             wget --timeout=$(params.download-timeout) --tries=3 --progress=bar:force -O "$CACHE_PATH" "$url"
           fi
+        fi
           
           if [ $? -eq 0 ]; then
             FILE_SIZE=$(du -h "$CACHE_PATH" | cut -f1)

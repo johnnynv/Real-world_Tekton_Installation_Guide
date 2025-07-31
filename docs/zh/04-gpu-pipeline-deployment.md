@@ -22,135 +22,278 @@
 
 ### GPU 环境验证
 ```bash
-# 检查 GPU 节点
-kubectl get nodes -l accelerator=nvidia-tesla-gpu
+# 检查 GPU 节点和资源
+kubectl get nodes -o wide
+kubectl get nodes --show-labels | grep nvidia
 
-# 检查 GPU 资源
-kubectl describe node <gpu-node-name> | grep nvidia.com/gpu
+# 检查 GPU 资源详情
+kubectl describe node $(kubectl get nodes -o jsonpath='{.items[0].metadata.name}') | grep nvidia.com/gpu
 
-# 验证 GPU 可用性
+# 验证 GPU 可用性（注意：使用overrides语法）
 kubectl run gpu-test --rm -i --tty --restart=Never \
   --image=nvidia/cuda:12.8-runtime-ubuntu22.04 \
-  --limits=nvidia.com/gpu=1 \
+  --overrides='{"spec":{"containers":[{"name":"gpu-test","image":"nvidia/cuda:12.8-runtime-ubuntu22.04","resources":{"limits":{"nvidia.com/gpu":"1"}}}]}}' \
   -- nvidia-smi
 ```
 
-## 🚀 步骤1：配置 GitHub 访问令牌
+## 🚀 步骤1：配置存储和服务账户
 
-### 创建 GitHub Token Secret
+### 1.1 创建 Service Account 和 RBAC
 ```bash
-# 创建用于私有仓库访问的 secret
+# 创建 Pipeline 需要的 Service Account
+cat > /tmp/tekton-pipeline-service-account.yaml << 'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: tekton-pipeline-service
+  namespace: tekton-pipelines
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-pipeline-service-role
+rules:
+- apiGroups: ["tekton.dev"]
+  resources: ["pipelines", "pipelineruns", "tasks", "taskruns"]
+  verbs: ["get", "list", "create", "update", "patch", "watch"]
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"]
+  verbs: ["get", "list", "create", "update", "patch", "watch", "delete"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-pipeline-service-binding
+subjects:
+- kind: ServiceAccount
+  name: tekton-pipeline-service
+  namespace: tekton-pipelines
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-pipeline-service-role
+EOF
+
+kubectl apply -f /tmp/tekton-pipeline-service-account.yaml
+```
+
+### 1.2 配置存储 (⚠️ 关键步骤)
+```bash
+# 创建立即绑定的存储方案
+cat > /tmp/immediate-storage.yaml << 'EOF'
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: immediate-local
+provisioner: kubernetes.io/no-provisioner
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: tekton-workspace-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: immediate-local
+  hostPath:
+    path: /tmp/tekton-workspace
+    type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: source-code-workspace
+  namespace: tekton-pipelines
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: immediate-local
+EOF
+
+kubectl apply -f /tmp/immediate-storage.yaml
+
+# 验证存储绑定
+kubectl get pvc -n tekton-pipelines
+kubectl get pv
+```
+
+### 1.3 配置 GitHub 访问令牌 (可选)
+```bash
+# 仅在需要私有仓库访问时创建
 kubectl create secret generic github-token \
   --from-literal=token=your-github-token-here \
   -n tekton-pipelines
 ```
 
-### 验证 Secret
+## 📦 步骤2：部署生产级 Tasks 和 Pipeline
+
+### 2.1 部署核心 Tasks
 ```bash
-kubectl get secret github-token -n tekton-pipelines -o yaml
-```
-
-## 📦 步骤2：部署生产级 Pipeline 文件
-
-项目已将所有文件整理到清晰的目录结构中：
-
-```
-examples/
-├── production/          # 生产级文件
-│   ├── pipelines/       # 主要工作流
-│   ├── tasks/          # 核心任务定义
-│   └── README.md       # 详细使用说明
-└── troubleshooting/    # 调试和开发历史
-    ├── pipelines/      # 各种迭代版本
-    └── tasks/          # 调试任务
-```
-
-### 部署核心 Tasks
-```bash
-# 部署主要的 RMM 修复版本 task
+# 部署所有生产级 tasks
 kubectl apply -f examples/production/tasks/gpu-papermill-production-init-rmm-fixed.yaml
+kubectl apply -f examples/production/tasks/safe-git-clone-task.yaml
+kubectl apply -f examples/production/tasks/jupyter-nbconvert-complete.yaml
+kubectl apply -f examples/production/tasks/large-dataset-download-task.yaml
+kubectl apply -f examples/production/tasks/pytest-execution-task.yaml
+kubectl apply -f examples/production/tasks/results-validation-cleanup-task.yaml
 
-# 部署其他核心 tasks
-kubectl apply -f examples/production/tasks/
+# 验证 tasks 部署
+kubectl get tasks -n tekton-pipelines | grep -E "(gpu-papermill|safe-git|jupyter|large-dataset|pytest|results)"
 ```
 
-### 部署 RMM 验证测试
+### 2.2 部署默认版本Pipeline (完整数据集 + PCA修复)
 ```bash
-# 首先部署简单的 RMM 验证测试
-kubectl apply -f examples/production/pipelines/rmm-simple-verification-test.yaml
+# 部署默认版本 (完整数据集，已包含所有修复)
+kubectl apply -f examples/production/pipelines/gpu-real-8-step-workflow.yaml
 
-# 监控测试执行
-kubectl get pipelinerun -n tekton-pipelines -w
+# 监控执行状态
+kubectl get pipelinerun gpu-real-8-step-workflow -n tekton-pipelines
+kubectl get pods -n tekton-pipelines | grep gpu-real-8-step-workflow
+
+# 查看实时日志
+kubectl logs -f -n tekton-pipelines $(kubectl get pods -n tekton-pipelines | grep step3-papermill | awk '{print $1}') -c step-execute-notebook-original
 ```
 
-## 🎯 步骤3：部署主要 GPU Workflows
+## 🌐 Web访问配置
 
-### 3.1 部署轻量级版本（推荐用于测试）
+### 创建Artifact Web服务器
 ```bash
-# 部署 lite 版本 - 使用子采样数据集，内存友好
-kubectl apply -f examples/production/pipelines/gpu-real-8-step-workflow-lite.yaml
+# 创建Web服务器用于浏览分析结果
+cat > /tmp/artifact-web-server.yaml << 'EOF'
+apiVersion: v1
+kind: Pod
+metadata:
+  name: artifact-web-server
+  namespace: tekton-pipelines
+  labels:
+    app: artifact-server
+spec:
+  containers:
+  - name: web-server
+    image: python:3.9-slim
+    command: ["python", "-m", "http.server", "8000", "--bind", "0.0.0.0"]
+    workingDir: "/data"
+    ports:
+    - containerPort: 8000
+    volumeMounts:
+    - mountPath: "/data"
+      name: shared-storage
+  volumes:
+  - name: shared-storage
+    persistentVolumeClaim:
+      claimName: source-code-workspace
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: artifact-web-service
+  namespace: tekton-pipelines
+spec:
+  selector:
+    app: artifact-server
+  ports:
+  - port: 8000
+    targetPort: 8000
+    nodePort: 30800
+  type: NodePort
+EOF
 
-# 监控执行
-kubectl get pipelinerun gpu-real-8-step-workflow-lite -n tekton-pipelines -w
+kubectl apply -f /tmp/artifact-web-server.yaml
 ```
 
-### 3.2 部署完整版本（生产环境）
+### 访问分析结果
 ```bash
-# 部署 original 版本 - 使用完整数据集，需要更多内存
-kubectl apply -f examples/production/pipelines/gpu-real-8-step-workflow-original.yaml
-
-# 监控执行  
-kubectl get pipelinerun gpu-real-8-step-workflow-original -n tekton-pipelines -w
+# Web界面访问地址
+🔗 主页面: http://10.34.2.129.nip.io:30800
+🔗 分析报告: http://10.34.2.129.nip.io:30800/artifacts/output_analysis.html
+🔗 Artifacts目录: http://10.34.2.129.nip.io:30800/artifacts/
+🔗 总结报告: http://10.34.2.129.nip.io:30800/artifacts/STEP_SUMMARY.md
 ```
 
-## 📋 两个版本对比
+## 📊 监控和故障排除
 
-| 特性 | Lite 版本 | Original 版本 |
-|------|----------|--------------|
-| **数据集大小** | 子采样 (50k 细胞, 10k 基因) | 完整数据集 |
-| **GPU 内存需求** | 2-4GB | 8GB+ |
-| **执行时间** | 快速 (~10-15 分钟) | 较慢 (~30-60 分钟) |
-| **适用场景** | 测试, CI/CD, 演示 | 生产分析 |
-| **成功率** | 高 (内存安全) | 中等 (可能遇到内存问题) |
-| **生成文件** | 完整制品集 | 完整制品集 |
+### 查看执行状态
+```bash
+# 查看 Pipeline 状态
+kubectl get pipelinerun -n tekton-pipelines
 
-## 🔧 完整的 8 步工作流架构
+# 查看具体 TaskRun 状态
+kubectl get taskrun -n tekton-pipelines | grep gpu-real-8-step-workflow
 
-两个版本都实现了相同的 8 步 GitHub Actions 风格工作流：
+# 查看 Pod 执行状态
+kubectl get pods -n tekton-pipelines | grep gpu-real-8-step-workflow
+
+# 查看实时日志
+kubectl logs -f -n tekton-pipelines <pod-name> -c <container-name>
+```
+
+### Pipeline架构选择
+
+#### 方案1：多Task设计（当前默认）
+- **优点**：模块化清晰，便于调试单个步骤
+- **缺点**：每个Task需重新安装依赖，执行时间longer
+- **适用**：开发调试阶段
+
+#### 方案2：单Task设计（高效版本）
+- **优点**：环境连续，一次安装全程可用，执行最快
+- **缺点**：调试相对复杂，单点故障影响整个流程
+- **适用**：生产环境
+
+```bash
+# 部署单Task高效版本
+kubectl apply -f examples/production/pipelines/gpu-single-task-workflow.yaml
+```
+
+### 常见问题处理
+如遇到问题，请参考 [troubleshooting.md](troubleshooting.md) 文档：
+- 存储绑定问题
+- 权限问题
+- GPU 资源分配问题
+- Task间环境隔离问题
+
+## 🔧 8 步工作流概览
+
+默认版本实现完整的 8 步 GitHub Actions 风格工作流：
 
 ```
 🔄 完整的 8 步 GPU 工作流:
 
-1. 📋 Container Environment Setup
-   - 设置环境变量
-   - 初始化工作空间
-   - 验证 GPU 可用性
-
+1. 📋 Container Environment Setup + 权限设置
 2. 📂 Git Clone Blueprint Repository  
-   - 克隆 single-cell-analysis-blueprint 仓库
-   - 验证 notebooks 目录
-   - 准备分析文件
-
-3. 🧬 Papermill Notebook Execution (with RMM)
-   - Init Container: 权限设置 + RMM 初始化
-   - GPU 内存管理配置
-   - Jupyter notebook 执行 (lite: 数据子采样)
-   - 错误处理和日志记录
-
+3. 🧬 Papermill Notebook Execution (with RMM + 完整数据集)
 4. 🌐 Jupyter NBConvert to HTML
-   - 将执行后的 notebook 转换为 HTML
-   - 生成可视化报告
-   - 准备测试输入
+5. 📥 Download Test Repository (需要 GitHub token)
 
-5. 📥 Download Test Repository  
-   - 克隆 blueprint-github-test 私有仓库
-   - 使用 GitHub token 认证
-   - 准备测试环境
+6. 🧪 Pytest Execution + Testing
+7. 📦 Results Collection and Artifacts
+8. 📊 Final Summary and Validation
+```
 
-6. 🧪 Pytest Execution (with Coverage)
-   - Poetry 环境设置
-   - 安装测试依赖 (pytest-cov, pytest-html)
-   - 执行测试套件
+### 预期执行时间
+- **总时间**: 30-60 分钟 (取决于数据集大小和GPU性能)
+- **关键步骤**: Step3 Papermill执行 (占用大部分时间)
+- **监控命令**: `kubectl get pods -n tekton-pipelines | grep gpu-real-8-step-workflow`
+
+## ✅ 验证成功
+
+当看到以下状态时，表示部署成功：
+```
+✅ Step1: Container Environment Setup - Completed
+✅ Step2: Git Clone Blueprint - Completed  
+🏃‍♂️ Step3: Papermill Execution - Running (X/90 cells)
+⏳ Step4-8: 等待队列中
+```
    - 生成覆盖率和 HTML 报告
 
 7. 📦 Results Collection and Artifacts
@@ -164,118 +307,14 @@ kubectl get pipelinerun gpu-real-8-step-workflow-original -n tekton-pipelines -w
    - 列出所有制品
 ```
 
-## 🔍 监控和日志查看
+### 生成的制品文件
 
-### 实时监控
-```bash
-# 查看 pipeline 状态
-kubectl get pipelinerun -n tekton-pipelines
-
-# 查看具体步骤
-kubectl get pods -n tekton-pipelines | grep gpu-real-8-step-workflow
-
-# 查看特定步骤日志
-kubectl logs <pod-name> -n tekton-pipelines -f
-```
-
-### 查看生成的制品
-```bash
-# 进入共享存储查看文件
-kubectl run temp-pod --rm -i --tty --restart=Never \
-  --image=busybox \
-  --overrides='{"spec":{"containers":[{"name":"temp-pod","image":"busybox","command":["sh"],"volumeMounts":[{"mountPath":"/data","name":"shared-storage"}]}],"volumes":[{"name":"shared-storage","persistentVolumeClaim":{"claimName":"shared-pvc"}}]}}' \
-  -n tekton-pipelines
-
-# 在 pod 内查看文件
-ls -la /data/
-cat /data/STEP_SUMMARY_LITE.md  # 或 STEP_SUMMARY_ORIGINAL.md
-```
-
-## 📁 生成的制品文件
-
-成功执行后会生成以下文件：
-
-### Lite 版本制品
-- **`output_analysis_lite.ipynb`** (4.3M) - 执行后的分析 notebook
-- **`output_analysis_lite.html`** (4.6M) - HTML 格式分析报告  
-- **`coverage_lite.xml`** - pytest 代码覆盖率报告
-- **`pytest_results_lite.xml`** - JUnit 格式测试结果
-- **`pytest_report_lite.html`** - HTML 格式测试报告
-- **`papermill.log`** (20K) - Papermill 执行日志
-- **`jupyter_nbconvert.log`** - HTML 转换日志
-- **`pytest_output.log`** - pytest 执行日志
-- **`STEP_SUMMARY_LITE.md`** - 完整工作流总结
-
-### Original 版本制品  
-类似于 lite 版本，但所有文件名不包含 `_lite` 后缀。
-
-## 🔗 集成 GitHub Webhook（可选）
-
-如需自动触发，可配置 GitHub webhook：
-
-### 创建 TriggerTemplate
-```bash
-cat <<EOF | kubectl apply -f -
-apiVersion: triggers.tekton.dev/v1beta1
-kind: TriggerTemplate
-metadata:
-  name: gpu-pipeline-trigger-template
-  namespace: tekton-pipelines
-spec:
-  params:
-  - name: git-repo-url
-  - name: git-revision
-  - name: pipeline-version
-    default: "lite"
-  resourcetemplates:
-  - apiVersion: tekton.dev/v1
-    kind: PipelineRun
-    metadata:
-      generateName: gpu-pipeline-run-
-    spec:
-      pipelineRef:
-        name: gpu-real-8-step-workflow-\$(tt.params.pipeline-version)
-      workspaces:
-      - name: shared-storage
-        volumeClaimTemplate:
-          spec:
-            accessModes: [ReadWriteOnce]
-            resources:
-              requests:
-                storage: 50Gi
-EOF
-```
-
-## 🐛 故障排除
-
-### 常见问题和解决方案
-
-#### 1. RMM 初始化失败
-```bash
-# 检查 RMM 验证测试
-kubectl logs <rmm-test-pod> -n tekton-pipelines
-
-# 常见解决方案：确保 GPU 节点有足够内存
-```
-
-#### 2. GPU 内存不足
-```bash
-# 推荐使用 lite 版本
-kubectl apply -f examples/production/pipelines/gpu-real-8-step-workflow-lite.yaml
-
-# 或检查 GPU 内存使用
-kubectl exec -it <gpu-pod> -n tekton-pipelines -- nvidia-smi
-```
-
-#### 3. GitHub 仓库访问失败
-```bash
-# 验证 GitHub token
-kubectl get secret github-token -n tekton-pipelines
-
-# 重新创建 token
-kubectl delete secret github-token -n tekton-pipelines
-kubectl create secret generic github-token --from-literal=token=new-token -n tekton-pipelines
-```
+成功执行后的主要输出：
+- **`output_analysis.ipynb`** - 执行后的分析 notebook
+- **`output_analysis.html`** - HTML 格式分析报告  
+- **`coverage.xml`** - pytest 代码覆盖率报告
+- **`pytest_results.xml`** - JUnit 格式测试结果
+- **`STEP_SUMMARY.md`** - 完整工作流总结
 
 #### 4. Poetry/依赖安装失败
 工作流包含智能错误处理：
@@ -290,7 +329,24 @@ kubectl create secret generic github-token --from-literal=token=new-token -n tek
 
 ## ✅ 验证部署成功
 
-### 1. 检查组件状态
+### 1. 运行验证脚本（推荐）
+```bash
+# 运行完整验证脚本
+chmod +x scripts/utils/verify-step4-gpu-pipeline-deployment.sh
+./scripts/utils/verify-step4-gpu-pipeline-deployment.sh
+```
+
+验证脚本会自动检查：
+- ✅ GPU 环境配置
+- ✅ GitHub Token 配置
+- ✅ GPU Pipeline 资源部署
+- ✅ GPU Task 资源验证
+- ✅ 持久存储配置
+- ✅ Pipeline 执行历史
+- ✅ GPU 可用性测试
+- ✅ RBAC 权限配置
+
+### 2. 手动检查组件状态（可选）
 ```bash
 # 检查主要 pipeline
 kubectl get pipeline -n tekton-pipelines | grep gpu-real-8-step-workflow
@@ -299,7 +355,7 @@ kubectl get pipeline -n tekton-pipelines | grep gpu-real-8-step-workflow
 kubectl get pipelinerun -n tekton-pipelines --sort-by=.metadata.creationTimestamp
 ```
 
-### 2. 查看执行总结
+### 3. 查看执行总结
 ```bash
 # 查看 lite 版本总结
 kubectl logs <final-summary-pod> -n tekton-pipelines | grep "🎉 ENTIRE 8-STEP"

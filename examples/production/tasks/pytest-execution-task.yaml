@@ -49,6 +49,11 @@ spec:
   - name: download-test-repo
     image: alpine/git:latest
     env:
+    - name: GITHUB_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: github-token-secret
+          key: token
     - name: WORKSPACE_SHARED_PATH
       value: $(workspaces.shared-storage.path)
     - name: WORKSPACE_TEST_PATH
@@ -82,7 +87,15 @@ spec:
       for attempt in $(seq 1 ${MAX_RETRIES}); do
         echo "🔄 Test repo clone attempt ${attempt}/${MAX_RETRIES}"
         
-        if git clone --branch $(params.test-repo-branch) --depth 1 $(params.test-repo-url) "${TEST_DIR}"; then
+        # Setup authenticated URL if GitHub token is provided
+        REPO_URL="$(params.test-repo-url)"
+        if [ -n "${GITHUB_TOKEN}" ] && [[ "${REPO_URL}" == *"github.com"* ]]; then
+          echo "🔐 Using GitHub token for authentication"
+          auth_url=$(echo "${REPO_URL}" | sed "s#https://github.com/#https://${GITHUB_TOKEN}@github.com/#")
+          REPO_URL="${auth_url}"
+        fi
+        
+        if git clone --branch $(params.test-repo-branch) --depth 1 "${REPO_URL}" "${TEST_DIR}"; then
           CLONE_SUCCESS=true
           echo "✅ Test repository clone successful on attempt ${attempt}"
           break

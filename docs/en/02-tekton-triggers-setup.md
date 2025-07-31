@@ -69,7 +69,7 @@ rules:
 
 # Tekton Triggers permissions
 - apiGroups: ["triggers.tekton.dev"]
-  resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers"]
+  resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers", "clusterinterceptors", "interceptors", "clustertriggerbindings"]
   verbs: ["get", "list", "create", "update", "patch", "watch"]
 
 # Core Kubernetes resources
@@ -216,7 +216,22 @@ echo "EventListener access URL: http://${NODE_IP}:${NODE_PORT}"
 
 ## ✅ Verify Triggers Configuration
 
-### 1. Check All Triggers Components
+### 1. Run Verification Script (Recommended)
+```bash
+# Run complete verification script
+chmod +x scripts/utils/verify-step2-triggers-setup.sh
+./scripts/utils/verify-step2-triggers-setup.sh
+```
+
+The verification script automatically checks:
+- ✅ Tekton Triggers component status
+- ✅ Tekton Triggers CRDs
+- ✅ RBAC permissions configuration
+- ✅ Trigger resources configuration
+- ✅ EventListener ready status
+- ✅ EventListener functionality test (automatic trigger test)
+
+### 2. Manual Component Check (Optional)
 ```bash
 # Check EventListener status
 kubectl get eventlistener -n tekton-pipelines
@@ -228,7 +243,7 @@ kubectl get triggertemplate,triggerbinding -n tekton-pipelines
 kubectl get svc,endpoints -n tekton-pipelines | grep el-
 ```
 
-### 2. Manual Test EventListener
+### 3. Manual Test EventListener (Optional)
 ```bash
 # Test EventListener response
 curl -X POST http://${NODE_IP}:${NODE_PORT} \
@@ -269,6 +284,32 @@ kubectl auth can-i create taskruns --as=system:serviceaccount:tekton-pipelines:t
 
 # Check Pod logs
 kubectl logs -l app.kubernetes.io/component=eventlistener -n tekton-pipelines
+
+# If you see permission errors, you may need to update ClusterRole permissions
+# Common errors: cannot list resource "clusterinterceptors"/"interceptors"/"clustertriggerbindings"
+kubectl patch clusterrole tekton-triggers-role --type='merge' -p='
+{
+  "rules": [
+    {
+      "apiGroups": ["tekton.dev"],
+      "resources": ["pipelines", "pipelineruns", "tasks", "taskruns"],
+      "verbs": ["get", "list", "create", "update", "patch", "watch"]
+    },
+    {
+      "apiGroups": ["triggers.tekton.dev"],
+      "resources": ["eventlisteners", "triggerbindings", "triggertemplates", "triggers", "clusterinterceptors", "interceptors", "clustertriggerbindings"],
+      "verbs": ["get", "list", "create", "update", "patch", "watch"]
+    },
+    {
+      "apiGroups": [""],
+      "resources": ["pods", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"],
+      "verbs": ["get", "list", "create", "update", "patch", "watch", "delete"]
+    }
+  ]
+}'
+
+# Restart EventListener Pod to apply new permissions
+kubectl delete pod -l eventlistener=hello-world-listener -n tekton-pipelines
 ```
 
 **2. Webhook Call Failed**

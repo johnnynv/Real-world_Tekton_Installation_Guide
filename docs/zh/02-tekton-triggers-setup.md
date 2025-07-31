@@ -69,7 +69,7 @@ rules:
 
 # Tekton Triggers 权限
 - apiGroups: ["triggers.tekton.dev"]
-  resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers"]
+  resources: ["eventlisteners", "triggerbindings", "triggertemplates", "triggers", "clusterinterceptors", "interceptors", "clustertriggerbindings"]
   verbs: ["get", "list", "create", "update", "patch", "watch"]
 
 # 核心 Kubernetes 资源
@@ -216,7 +216,22 @@ echo "EventListener 访问地址: http://${NODE_IP}:${NODE_PORT}"
 
 ## ✅ 验证 Triggers 配置
 
-### 1. 检查所有 Triggers 组件
+### 1. 运行验证脚本（推荐）
+```bash
+# 运行完整验证脚本
+chmod +x scripts/utils/verify-step2-triggers-setup.sh
+./scripts/utils/verify-step2-triggers-setup.sh
+```
+
+验证脚本会自动检查：
+- ✅ Tekton Triggers 组件状态
+- ✅ Tekton Triggers CRDs
+- ✅ RBAC 权限配置
+- ✅ Trigger 资源配置
+- ✅ EventListener 就绪状态
+- ✅ EventListener 功能测试（自动触发测试）
+
+### 2. 手动检查组件（可选）
 ```bash
 # 检查 EventListener 状态
 kubectl get eventlistener -n tekton-pipelines
@@ -228,7 +243,7 @@ kubectl get triggertemplate,triggerbinding -n tekton-pipelines
 kubectl get svc,endpoints -n tekton-pipelines | grep el-
 ```
 
-### 2. 手动测试 EventListener
+### 3. 手动测试 EventListener（可选）
 ```bash
 # 测试 EventListener 响应
 curl -X POST http://${NODE_IP}:${NODE_PORT} \
@@ -269,6 +284,32 @@ kubectl auth can-i create taskruns --as=system:serviceaccount:tekton-pipelines:t
 
 # 检查 Pod 日志
 kubectl logs -l app.kubernetes.io/component=eventlistener -n tekton-pipelines
+
+# 如果看到权限错误，可能需要更新ClusterRole权限
+# 常见错误：cannot list resource "clusterinterceptors"/"interceptors"/"clustertriggerbindings"
+kubectl patch clusterrole tekton-triggers-role --type='merge' -p='
+{
+  "rules": [
+    {
+      "apiGroups": ["tekton.dev"],
+      "resources": ["pipelines", "pipelineruns", "tasks", "taskruns"],
+      "verbs": ["get", "list", "create", "update", "patch", "watch"]
+    },
+    {
+      "apiGroups": ["triggers.tekton.dev"],
+      "resources": ["eventlisteners", "triggerbindings", "triggertemplates", "triggers", "clusterinterceptors", "interceptors", "clustertriggerbindings"],
+      "verbs": ["get", "list", "create", "update", "patch", "watch"]
+    },
+    {
+      "apiGroups": [""],
+      "resources": ["pods", "services", "endpoints", "persistentvolumeclaims", "configmaps", "secrets"],
+      "verbs": ["get", "list", "create", "update", "patch", "watch", "delete"]
+    }
+  ]
+}'
+
+# 重启 EventListener Pod 使新权限生效
+kubectl delete pod -l eventlistener=hello-world-listener -n tekton-pipelines
 ```
 
 **2. Webhook 调用失败**

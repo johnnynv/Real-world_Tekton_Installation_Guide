@@ -42,6 +42,44 @@ spec:
   - name: nbconvert-log-path
     description: Path to the nbconvert log file
   steps:
+  # Init container for workspace permission setup (Best Practice)
+  - name: init-workspace-permissions
+    image: alpine:latest
+    securityContext:
+      runAsUser: 0
+      runAsGroup: 0
+    env:
+    - name: WORKSPACE_SHARED_PATH
+      value: $(workspaces.shared-storage.path)
+    - name: DOCKER_WRITEABLE_DIR
+      value: "$(workspaces.shared-storage.path)/artifacts"
+    script: |
+      #!/bin/sh
+      set -eu
+      
+      echo "🔧 Init Container: Setting up workspace permissions for NBConvert"
+      echo "================================================="
+      
+      # Create artifacts directory if it doesn't exist
+      mkdir -p "${DOCKER_WRITEABLE_DIR}"
+      
+      # Set universal permissions for cross-user compatibility
+      echo "Setting workspace permissions..."
+      chown -R root:root "${WORKSPACE_SHARED_PATH}" 2>/dev/null || echo "Note: Cannot change ownership"
+      chmod -R 777 "${WORKSPACE_SHARED_PATH}" 2>/dev/null || echo "Note: Cannot change permissions"
+      
+      # Specifically ensure artifacts directory is writable
+      chown -R root:root "${DOCKER_WRITEABLE_DIR}" 2>/dev/null || echo "Note: Cannot change artifacts ownership"
+      chmod -R 777 "${DOCKER_WRITEABLE_DIR}" 2>/dev/null || echo "Note: Cannot change artifacts permissions"
+      
+      # List current permissions for verification
+      echo "📋 Current workspace permissions:"
+      ls -la "${WORKSPACE_SHARED_PATH}" || echo "Cannot list workspace"
+      echo "📋 Current artifacts permissions:"
+      ls -la "${DOCKER_WRITEABLE_DIR}" || echo "Cannot list artifacts"
+      
+      echo "✅ Init container completed: Workspace permissions configured"
+
   - name: convert-to-html-complete
     image: nvcr.io/nvidia/rapidsai/notebooks:25.04-cuda12.8-py3.12
     securityContext:
@@ -57,7 +95,7 @@ spec:
     - name: WORKSPACE_SHARED_PATH
       value: $(workspaces.shared-storage.path)
     - name: DOCKER_WRITEABLE_DIR
-      value: "/workspace/shared/artifacts"
+      value: "$(workspaces.shared-storage.path)/artifacts"
     - name: INPUT_NOTEBOOK
       value: $(params.input-notebook-name)
     - name: OUTPUT_NOTEBOOK_HTML
@@ -70,17 +108,11 @@ spec:
       #!/bin/bash
       set -eu
       
-      echo "Starting Complete Jupyter nbconvert HTML conversion (GitHub Actions Compatible)..."
+      echo "📔 Starting Jupyter NBConvert HTML conversion"
+      echo "============================================="
       echo "Shared workspace: ${WORKSPACE_SHARED_PATH}"
       echo "Input notebook: ${INPUT_NOTEBOOK}"
       echo "Output HTML: ${OUTPUT_NOTEBOOK_HTML}"
-      
-      # Fix permissions comprehensively
-      echo "Fixing all permission issues..."
-      chown -R root:root /opt/conda 2>/dev/null || echo "WARNING: Cannot change conda ownership"
-      chmod -R 777 /opt/conda 2>/dev/null || echo "WARNING: Cannot change conda permissions"
-      chown -R root:root "${WORKSPACE_SHARED_PATH}" 2>/dev/null || echo "WARNING: Cannot change workspace ownership"
-      chmod -R 777 "${WORKSPACE_SHARED_PATH}" 2>/dev/null || echo "WARNING: Cannot change workspace permissions"
       
       # Setup environment
       export HOME="/root"
@@ -149,13 +181,12 @@ spec:
       # Use EXACT same command as GitHub Actions workflow
       if $JUPYTER_BIN nbconvert --to html "${INPUT_NOTEBOOK_PATH}" \
           --output "${OUTPUT_NOTEBOOK_HTML}" \
-          --output-dir "${DOCKER_WRITEABLE_DIR}" \
-          > "${NBCONVERT_LOG_PATH}" 2>&1; then
+          --output-dir "${DOCKER_WRITEABLE_DIR}"; then
         echo "SUCCESS: Jupyter nbconvert completed!"
+        # Create log file with success message (optional)
+        echo "NBConvert completed successfully at $(date)" > "${NBCONVERT_LOG_PATH}" || echo "Note: Could not write log file"
       else
         echo "ERROR: Jupyter nbconvert failed"
-        echo "nbconvert log contents:"
-        cat "${NBCONVERT_LOG_PATH}" || echo "Log file not found"
         exit 1
       fi
       
@@ -202,7 +233,7 @@ spec:
     - name: WORKSPACE_SHARED_PATH
       value: $(workspaces.shared-storage.path)
     - name: DOCKER_WRITEABLE_DIR
-      value: "/workspace/shared/artifacts"
+      value: "$(workspaces.shared-storage.path)/artifacts"
     - name: OUTPUT_NOTEBOOK_HTML
       value: $(params.output-html-name)
     script: |
