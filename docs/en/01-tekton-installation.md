@@ -434,6 +434,80 @@ kubectl get ingress tekton-dashboard -n tekton-pipelines
 kubectl logs -n ingress-nginx deploy/ingress-nginx-controller --tail=10
 ```
 
+**4. Dashboard Missing Menus and Limited Namespaces - Read-Only Mode**
+
+**Symptoms**:
+- Dashboard login successful but many menu items missing
+- Only limited Pipeline, Task resources visible
+- Cannot see all namespaces, only default ones
+- Missing create, edit, delete operation buttons
+- Proxy request errors: "Error while proxying request: context canceled"
+
+**Root Cause**: Dashboard deployment has read-only mode enabled (`--read-only=true`), severely limiting functionality.
+
+**Solution**:
+```bash
+# Step 1: Modify Dashboard deployment to disable read-only mode
+kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/args",
+    "value": [
+      "--default-namespace=",
+      "--external-logs=",
+      "--log-format=json",
+      "--log-level=info",
+      "--logout-url=",
+      "--namespaces=",
+      "--pipelines-namespace=tekton-pipelines",
+      "--port=9097",
+      "--read-only=false",
+      "--stream-logs=true",
+      "--triggers-namespace=tekton-pipelines"
+    ]
+  }
+]'
+
+# Step 2: Create comprehensive ClusterRole
+cat <<EOF | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-dashboard-backend-edit
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: tekton-dashboard
+rules:
+- apiGroups: ["tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["triggers.tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "pods/log", "events", "configmaps", "secrets", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+EOF
+
+# Step 3: Update ClusterRoleBinding
+kubectl patch clusterrolebinding tekton-dashboard-backend-view --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/roleRef/name",
+    "value": "tekton-dashboard-backend-edit"
+  }
+]'
+
+# Step 4: Restart Dashboard
+kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
+```
+
 ⚠️ **Common Access Issues**:
 - **SSL Certificate Issues**: See [Troubleshooting Guide - SSL Certificate SAN Warning](troubleshooting.md#issue-dashboard-https-access-failure---ssl-certificate-san-warning)
 - **Complete Inaccessibility**: See [Troubleshooting Guide - Ingress Controller Configuration Conflict](troubleshooting.md#issue-dashboard-completely-inaccessible---ingress-controller-configuration-conflict)

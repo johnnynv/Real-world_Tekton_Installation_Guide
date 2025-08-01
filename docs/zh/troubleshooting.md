@@ -223,6 +223,138 @@ kubectl delete pod -l app.kubernetes.io/name=dashboard -n tekton-pipelines
 - Dashboard需要访问 `10.96.0.1:443` (Kubernetes API服务器)
 - 修正后的策略使用 `to: []` 允许访问集群内API服务器
 
+#### 问题：Dashboard 菜单消失和 Namespace 缺失 - 只读模式限制
+**症状**：
+- Dashboard 登录成功，但大量菜单项消失
+- 只能看到有限的 Pipeline、Task 等资源
+- 无法看到所有 namespace，只显示默认的几个
+- 缺少创建、编辑、删除等操作按钮
+- 大量的代理请求错误："Error while proxying request: context canceled"
+
+**错误日志**：
+```
+{"level":"error","ts":1753948452.710296,"caller":"router/router.go:96","msg":"Error while proxying request: context canceled"}
+Error proxying data from client to backend: writeto tcp: read: connection reset by peer
+```
+
+**根本原因分析**：
+Dashboard 部署配置中启用了只读模式（`--read-only=true`），这严重限制了 Dashboard 的功能：
+
+```yaml
+# 问题配置 - 只读模式启用
+args:
+- --read-only=true  # ← 这是问题所在
+- --namespaces=      # 空值限制了namespace访问
+```
+
+**权限检查**：
+```bash
+# 检查当前权限配置
+kubectl describe clusterrole tekton-dashboard-backend-view
+# 输出显示只有基本的 get/list/watch 权限，缺少完整的管理权限
+```
+
+**完整解决方案**：
+
+**步骤1：修改 Dashboard 部署配置**
+```bash
+# 获取当前 Dashboard 部署配置
+kubectl get deployment tekton-dashboard -n tekton-pipelines -o yaml > dashboard-backup.yaml
+
+# 修改部署以禁用只读模式
+kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/spec/template/spec/containers/0/args",
+    "value": [
+      "--default-namespace=",
+      "--external-logs=",
+      "--log-format=json",
+      "--log-level=info",
+      "--logout-url=",
+      "--namespaces=",
+      "--pipelines-namespace=tekton-pipelines",
+      "--port=9097",
+      "--read-only=false",
+      "--stream-logs=true",
+      "--triggers-namespace=tekton-pipelines"
+    ]
+  }
+]'
+```
+
+**步骤2：升级 Dashboard 权限**
+```bash
+# 创建更全面的 ClusterRole
+cat <<EOF | kubectl apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-dashboard-backend-edit
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: tekton-dashboard
+rules:
+# Tekton 资源完整权限
+- apiGroups: ["tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["triggers.tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+# Kubernetes 核心资源权限
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "pods/log", "events", "configmaps", "secrets", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+EOF
+
+# 更新 ClusterRoleBinding
+kubectl patch clusterrolebinding tekton-dashboard-backend-view --type='json' -p='[
+  {
+    "op": "replace",
+    "path": "/roleRef/name",
+    "value": "tekton-dashboard-backend-edit"
+  }
+]'
+```
+
+**步骤3：重启 Dashboard 使配置生效**
+```bash
+kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
+kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
+```
+
+**步骤4：验证修复结果**
+```bash
+# 检查 Dashboard Pod 状态
+kubectl get pods -l app.kubernetes.io/name=dashboard -n tekton-pipelines
+
+# 检查新的权限
+kubectl auth can-i --list --as=system:serviceaccount:tekton-pipelines:tekton-dashboard
+
+# 访问 Dashboard 验证功能
+echo "访问地址: https://tekton.$(hostname -I | awk '{print $1}').nip.io"
+```
+
+**预期结果**：
+- ✅ 所有 namespace 都可见
+- ✅ 完整的菜单项（Pipelines、Tasks、Triggers等）
+- ✅ 可以创建、编辑、删除资源
+- ✅ 实时日志和详细信息可正常查看
+- ✅ 代理错误消失
+
+**安全提示**：
+只读模式虽然提供了安全性，但严重限制了 Dashboard 的实用性。在生产环境中，建议：
+1. 使用基于角色的访问控制（RBAC）限制特定用户权限
+2. 通过网络策略控制访问范围
+3. 定期审查 Dashboard 访问日志
+
 #### 问题：Dashboard HTTPS访问失败 - SSL证书SAN警告
 **症状**：
 - Dashboard网址无法访问
