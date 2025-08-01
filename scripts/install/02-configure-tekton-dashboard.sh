@@ -4,6 +4,16 @@ set -euo pipefail
 
 # Production Tekton Dashboard Configuration Script
 # Configures secure HTTPS access with authentication
+#
+# Usage:
+#   # Use with default random password:
+#   ./02-configure-tekton-dashboard.sh
+#
+#   # Use with custom password (e.g., admin123):
+#   ADMIN_PASSWORD="admin123" ./02-configure-tekton-dashboard.sh
+#
+#   # Use with custom domain and password:
+#   DASHBOARD_HOST="tekton.example.com" ADMIN_PASSWORD="admin123" ./02-configure-tekton-dashboard.sh
 
 # Colors
 RED='\033[0;31m'
@@ -55,6 +65,8 @@ generate_admin_password() {
         echo "$ADMIN_PASSWORD" > dashboard-admin-password.txt
         log_warning "Admin password saved to: dashboard-admin-password.txt"
         log_warning "Please save this password securely and delete the file!"
+    else
+        log_info "Using provided admin password: $ADMIN_PASSWORD"
     fi
 }
 

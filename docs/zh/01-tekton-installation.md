@@ -233,6 +233,8 @@ kubectl patch ingress tekton-dashboard -n tekton-pipelines --type='merge' -p='
 ```
 
 ### 配置 Dashboard 基本认证（生产环境推荐）
+
+#### 方法1：使用默认随机密码
 ```bash
 # 生成随机密码
 DASHBOARD_PASSWORD=$(openssl rand -base64 12)
@@ -265,6 +267,83 @@ echo "🔐 Dashboard认证配置完成"
 echo "🔑 用户名: admin"
 echo "🔑 密码: $DASHBOARD_PASSWORD"
 echo "📝 认证信息已保存到: dashboard-access-info.txt"
+```
+
+#### 方法2：使用自定义密码（如 admin123）
+```bash
+# 设置自定义密码
+DASHBOARD_PASSWORD="admin123"
+echo "admin:$(openssl passwd -apr1 $DASHBOARD_PASSWORD)" > /tmp/dashboard-auth
+
+# 创建认证Secret
+kubectl create secret generic tekton-dashboard-auth \
+  --from-file=auth=/tmp/dashboard-auth \
+  -n tekton-pipelines
+
+# 更新Ingress启用基本认证
+kubectl patch ingress tekton-dashboard -n tekton-pipelines --type='merge' -p='
+{
+  "metadata": {
+    "annotations": {
+      "nginx.ingress.kubernetes.io/auth-type": "basic",
+      "nginx.ingress.kubernetes.io/auth-secret": "tekton-dashboard-auth",
+      "nginx.ingress.kubernetes.io/auth-realm": "Tekton Dashboard"
+    }
+  }
+}'
+
+# 保存认证信息
+echo "Dashboard访问信息:" > dashboard-access-info.txt
+echo "URL: https://tekton.$(hostname -I | awk '{print $1}').nip.io" >> dashboard-access-info.txt
+echo "用户名: admin" >> dashboard-access-info.txt
+echo "密码: $DASHBOARD_PASSWORD" >> dashboard-access-info.txt
+
+echo "🔐 Dashboard认证配置完成"
+echo "🔑 用户名: admin"
+echo "🔑 密码: $DASHBOARD_PASSWORD"
+echo "📝 认证信息已保存到: dashboard-access-info.txt"
+```
+
+#### 修改现有密码为 admin123
+如果你已经配置了Dashboard认证，可以使用以下命令修改密码：
+
+```bash
+# 设置新密码
+NEW_PASSWORD="admin123"
+
+# 生成新的认证文件
+echo "admin:$(openssl passwd -apr1 $NEW_PASSWORD)" > /tmp/dashboard-auth-new
+
+# 删除现有的认证Secret
+kubectl delete secret tekton-dashboard-auth -n tekton-pipelines --ignore-not-found
+
+# 创建新的认证Secret
+kubectl create secret generic tekton-dashboard-auth \
+  --from-file=auth=/tmp/dashboard-auth-new \
+  -n tekton-pipelines
+
+# 更新访问信息文件
+echo "Dashboard访问信息:" > dashboard-access-info.txt
+echo "URL: https://tekton.$(hostname -I | awk '{print $1}').nip.io" >> dashboard-access-info.txt
+echo "用户名: admin" >> dashboard-access-info.txt
+echo "密码: $NEW_PASSWORD" >> dashboard-access-info.txt
+
+echo "🔐 Dashboard密码已更新为: $NEW_PASSWORD"
+echo "📝 认证信息已保存到: dashboard-access-info.txt"
+
+# 清理临时文件
+rm -f /tmp/dashboard-auth-new
+```
+
+#### 使用便捷脚本修改密码
+项目提供了一个便捷的密码修改脚本：
+
+```bash
+# 使用脚本快速修改密码为 admin123
+scripts/utils/change-dashboard-password.sh admin123
+
+# 或者交互式输入密码
+scripts/utils/change-dashboard-password.sh
 ```
 
 ⚠️ **安全提示**：

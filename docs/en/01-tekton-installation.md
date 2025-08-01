@@ -233,6 +233,8 @@ kubectl patch ingress tekton-dashboard -n tekton-pipelines --type='merge' -p='
 ```
 
 ### Configure Dashboard Basic Authentication (Production Recommended)
+
+#### Method 1: Using Default Random Password
 ```bash
 # Generate random password
 DASHBOARD_PASSWORD=$(openssl rand -base64 12)
@@ -265,6 +267,83 @@ echo "🔐 Dashboard authentication configured"
 echo "🔑 Username: admin"
 echo "🔑 Password: $DASHBOARD_PASSWORD"
 echo "📝 Authentication info saved to: dashboard-access-info.txt"
+```
+
+#### Method 2: Using Custom Password (e.g., admin123)
+```bash
+# Set custom password
+DASHBOARD_PASSWORD="admin123"
+echo "admin:$(openssl passwd -apr1 $DASHBOARD_PASSWORD)" > /tmp/dashboard-auth
+
+# Create authentication Secret
+kubectl create secret generic tekton-dashboard-auth \
+  --from-file=auth=/tmp/dashboard-auth \
+  -n tekton-pipelines
+
+# Update Ingress to enable basic authentication
+kubectl patch ingress tekton-dashboard -n tekton-pipelines --type='merge' -p='
+{
+  "metadata": {
+    "annotations": {
+      "nginx.ingress.kubernetes.io/auth-type": "basic",
+      "nginx.ingress.kubernetes.io/auth-secret": "tekton-dashboard-auth",
+      "nginx.ingress.kubernetes.io/auth-realm": "Tekton Dashboard"
+    }
+  }
+}'
+
+# Save authentication information
+echo "Dashboard Access Information:" > dashboard-access-info.txt
+echo "URL: https://tekton.$(hostname -I | awk '{print $1}').nip.io" >> dashboard-access-info.txt
+echo "Username: admin" >> dashboard-access-info.txt
+echo "Password: $DASHBOARD_PASSWORD" >> dashboard-access-info.txt
+
+echo "🔐 Dashboard authentication configured"
+echo "🔑 Username: admin"
+echo "🔑 Password: $DASHBOARD_PASSWORD"
+echo "📝 Authentication info saved to: dashboard-access-info.txt"
+```
+
+#### Change Existing Password to admin123
+If you have already configured Dashboard authentication, you can change the password using these commands:
+
+```bash
+# Set new password
+NEW_PASSWORD="admin123"
+
+# Generate new authentication file
+echo "admin:$(openssl passwd -apr1 $NEW_PASSWORD)" > /tmp/dashboard-auth-new
+
+# Delete existing authentication Secret
+kubectl delete secret tekton-dashboard-auth -n tekton-pipelines --ignore-not-found
+
+# Create new authentication Secret
+kubectl create secret generic tekton-dashboard-auth \
+  --from-file=auth=/tmp/dashboard-auth-new \
+  -n tekton-pipelines
+
+# Update access information file
+echo "Dashboard Access Information:" > dashboard-access-info.txt
+echo "URL: https://tekton.$(hostname -I | awk '{print $1}').nip.io" >> dashboard-access-info.txt
+echo "Username: admin" >> dashboard-access-info.txt
+echo "Password: $NEW_PASSWORD" >> dashboard-access-info.txt
+
+echo "🔐 Dashboard password updated to: $NEW_PASSWORD"
+echo "📝 Authentication info saved to: dashboard-access-info.txt"
+
+# Clean up temporary files
+rm -f /tmp/dashboard-auth-new
+```
+
+#### Using Convenience Script to Change Password
+The project provides a convenient password change script:
+
+```bash
+# Use the script to quickly change password to admin123
+scripts/utils/change-dashboard-password.sh admin123
+
+# Or use interactive mode to enter password
+scripts/utils/change-dashboard-password.sh
 ```
 
 ⚠️ **Security Notes**:
