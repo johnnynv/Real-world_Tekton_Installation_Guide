@@ -1,123 +1,171 @@
 # Real-world Tekton Installation Guide
 
-一个经过实战验证的 Tekton 完整安装指南，支持 kubeadm 环境，包含生产级配置。
+A production-ready Tekton installation guide for kubeadm environments with GPU-enabled scientific computing pipelines.
 
-## ✅ 已完成功能
+## ✅ Features Overview
 
-### 🏗️ 步骤1：Tekton 核心安装 (已完成)
-- ✅ **Tekton Pipelines** 核心引擎安装
-- ✅ **Tekton Dashboard** Web界面安装  
-- ✅ **Pod Security Standards** 配置 (Kubernetes 1.24+)
-- ✅ **Nginx Ingress Controller** 生产级访问
-- ✅ **域名访问配置** (tekton.<IP>.nip.io)
-- ✅ **HTTPS 支持** (自签名证书，标准443端口)
-- ✅ **完整验证脚本** 
+### 🏗️ Core Infrastructure
+- ✅ **Tekton Pipelines** - Core workflow engine
+- ✅ **Tekton Dashboard** - Web interface with authentication  
+- ✅ **Pod Security Standards** - Kubernetes 1.24+ compliance
+- ✅ **Nginx Ingress Controller** - Production-grade access
+- ✅ **Domain Access** - tekton.<IP>.nip.io configuration
+- ✅ **HTTPS Support** - Self-signed certificates on port 443
 
-### 🚀 快速开始
+### 🧬 GPU Scientific Computing Pipeline
+- ✅ **Single-cell RNA Analysis** - Complete preprocessing workflow
+- ✅ **GPU Acceleration** - RAPIDS cuML and Scanpy integration  
+- ✅ **Jupyter Notebook Execution** - Papermill-based automation
+- ✅ **Test Framework Integration** - pytest with coverage reporting
+- ✅ **Web Results Interface** - Automated artifact presentation
+- ✅ **Multi-framework Testing** - pytest, Go test, Jest, JUnit support
 
-#### 1. 克隆项目
+## 🚀 Quick Start
+
+### 1. Clone Repository
 ```bash
 git clone https://github.com/your-repo/Real-world_Tekton_Installation_Guide.git
 cd Real-world_Tekton_Installation_Guide
 ```
 
-#### 2. 配置 kubectl (kubeadm 环境)
+### 2. Configure kubectl (kubeadm environment)
 ```bash
 mkdir -p ~/.kube
 sudo cp /etc/kubernetes/admin.conf ~/.kube/config
 sudo chown $(id -u):$(id -g) ~/.kube/config
 ```
 
-#### 3. 安装 Tekton 核心组件
+### 3. Install Tekton Core Components
 ```bash
-# 按照文档步骤执行
-cat docs/zh/01-tekton-installation.md
+# Follow the installation documentation
+cat docs/en/01-tekton-installation.md
 ```
 
-#### 4. 访问 Dashboard
+### 4. Deploy GPU Scientific Computing Pipeline
 ```bash
-# 获取访问地址
+# Deploy the complete workflow
+kubectl apply -f examples/tekton/pipelines/gpu-scrna-analysis-preprocessing-workflow.yaml
+```
+
+### 5. Access Dashboard
+```bash
+# Get access URL
 NODE_IP=$(hostname -I | awk '{print $1}')
 echo "🌐 Dashboard: https://tekton.$NODE_IP.nip.io"
-echo "   (使用标准443端口，HTTP自动重定向)"
+echo "   Username: admin, Password: admin123"
 ```
 
-### 📁 项目结构
+## 📁 Project Structure
 ```
-├── docs/
-│   ├── zh/                    # 中文文档  
-│   │   ├── 01-tekton-installation.md      ✅ 已完成
-│   │   ├── 02-tekton-triggers-setup.md    📋 待完成
-│   │   ├── 03-tekton-webhook-configuration.md  📋 待完成  
-│   │   └── 04-gpu-pipeline-deployment.md  📋 待完成
-│   └── en/                    # 英文文档
-│       ├── 01-tekton-installation.md      ✅ 已同步
-│       └── ...
-├── scripts/
-│   ├── utils/
-│   │   └── verify-step1-installation.sh   ✅ 验证脚本
-│   ├── install/               # 自动化安装脚本
-│   └── cleanup/               # 环境清理脚本
-└── examples/                  # 示例配置文件
-    ├── basic/                 # 基础示例(pipelines, tasks, triggers, workspaces, dashboard)
-    ├── development/           # 开发环境(testing, debug)
-    ├── production/            # 生产环境配置
-    ├── troubleshooting/       # 故障排除示例
-    └── runs/                  # Pipeline运行示例
+├── examples/                        # 📚 All Tekton examples and configurations
+│   ├── tekton/                      # Tekton-specific manifests
+│   │   ├── pipelines/               # 🚀 Main workflow pipelines
+│   │   │   └── gpu-scrna-analysis-preprocessing-workflow.yaml
+│   │   ├── tasks/                   # 🔧 Reusable task definitions
+│   │   │   ├── gpu-papermill-execution-*   # GPU notebook execution
+│   │   │   ├── jupyter-nbconvert-*          # Notebook conversion
+│   │   │   ├── large-dataset-download-*     # Data download tasks
+│   │   │   └── results-validation-*         # Validation tasks
+│   │   └── runs/                    # ▶️ Pipeline execution examples
+│   └── config/                      # Configuration files
+│       └── dashboard/               # 📊 Dashboard configurations
+├── docs/                            # 📖 Documentation
+│   ├── en/                          # English Documentation
+│   │   ├── 01-tekton-installation.md
+│   │   ├── 02-tekton-triggers-setup.md
+│   │   ├── 03-tekton-webhook-configuration.md
+│   │   └── 04-gpu-pipeline-deployment.md
+│   └── zh/                          # Chinese Documentation (完整中文文档)
+├── scripts/                         # 🛠️ Automation scripts
+│   ├── install/                     # Installation automation
+│   ├── utils/                       # Utility scripts
+│   └── cleanup/                     # Environment cleanup
+└── solutions/                       # 💡 Solution templates
 ```
 
-### 🎯 特色功能
+## 🎯 Key Features
 
-#### ✅ 生产级配置
-- **kubeadm 环境支持**: 完整的 kubectl 配置指南
-- **Pod Security Standards**: 自动解决 Kubernetes 1.24+ 安全策略问题
-- **域名访问**: 使用 nip.io 无需 DNS 配置
-- **HTTPS 支持**: 自签名证书配置
+### ✅ Production-Ready Infrastructure
+- **kubeadm Environment Support**: Complete kubectl configuration guide
+- **Pod Security Standards**: Automatic Kubernetes 1.24+ compliance
+- **Domain Access**: nip.io integration without DNS configuration
+- **HTTPS Support**: Self-signed certificate configuration
+- **Authentication**: Basic auth for dashboard access
 
-#### ✅ 验证机制
-- **自动化验证**: 一键检查所有组件状态
-- **实际测试**: TaskRun 执行验证
-- **访问验证**: Dashboard 界面功能确认
+### ✅ GPU Scientific Computing
+- **RAPIDS Integration**: GPU-accelerated data science libraries
+- **Jupyter Automation**: Papermill notebook execution
+- **Large Dataset Handling**: 1.7GB+ scientific datasets
+- **Memory Management**: RMM (RAPIDS Memory Manager) optimization
+- **Test Integration**: Comprehensive pytest validation
 
-#### ✅ 文档质量
-- **步骤精简**: 去除冗余，保留核心验证步骤
-- **双语支持**: 中英文文档同步更新
-- **实战验证**: 每个步骤都经过实际环境测试
+### ✅ Web Interface & Reporting
+- **Automated Artifact Management**: Per-pipeline-run organization
+- **Test Results Summary**: Coverage, pass/fail rates, framework detection
+- **Download Interface**: Direct access to notebooks, reports, logs
+- **Multi-framework Support**: pytest, Go test, Jest, JUnit, TestNG
 
-### 🔧 环境要求
-- **Kubernetes**: v1.24+ (kubeadm/minikube/云厂商)
-- **节点配置**: 2CPU, 4GB RAM (最低要求)
-- **网络**: 能访问 storage.googleapis.com
-- **权限**: sudo 权限 (配置 kubectl)
+### ✅ Validation & Quality
+- **Automated Verification**: One-click component status checking
+- **Real Pipeline Testing**: TaskRun execution validation
+- **Access Verification**: Dashboard functionality confirmation
+- **Error Tolerance**: Smart handling of visualization errors
 
-### 📊 验证结果示例
+## 🔧 System Requirements
+- **Kubernetes**: v1.24+ (kubeadm/minikube/cloud providers)
+- **GPU**: NVIDIA GPU with CUDA support (for scientific computing)
+- **Node Configuration**: 4CPU, 8GB RAM (minimum for GPU workloads)
+- **Network**: Access to storage.googleapis.com and registry.hub.docker.com
+- **Permissions**: sudo access for kubectl configuration
+
+## 📊 Pipeline Execution Example
 ```bash
-🔍 验证 Tekton 步骤1 安装...
-================================
-1. 检查 Tekton 命名空间...          ✅
-2. 检查 Pod Security Standards 配置... ✅  
-3. 检查 Tekton Pipelines 组件...   ✅
-4. 检查 Tekton Dashboard...        ✅
-5. 检查 Tekton CRDs...            ✅
-6. 检查测试 Task...               ✅
-7. 检查 Dashboard 访问配置...       ✅
+# Start GPU scientific computing pipeline
+kubectl create -f pipelines/gpu-scrna-analysis-preprocessing-workflow.yaml
 
-🌐 HTTP访问: http://tekton.10.34.2.129.nip.io (自动重定向)
-🔒 HTTPS访问: https://tekton.10.34.2.129.nip.io (标准443端口)
-================================
-✅ Tekton 步骤1 验证完成！
+# Monitor progress
+kubectl get pipelinerun -n tekton-pipelines -w
+
+# Access results (after completion)
+echo "🌐 Results: http://artifacts.<NODE_IP>.nip.io/pipeline-runs/run-<ID>/web/"
 ```
 
-### 🗺️ 后续规划
-- [ ] **步骤2**: Tekton Triggers 安装配置
-- [ ] **步骤3**: GitHub Webhook 集成  
-- [ ] **步骤4**: GPU Pipeline 部署
-- [ ] **生产优化**: 高可用、监控、备份方案
+## 🧪 Test Results Integration
 
-### 📞 支持
-- **问题反馈**: 通过 GitHub Issues
-- **文档改进**: 欢迎 Pull Request
-- **技术讨论**: 参考 troubleshooting.md
+The web interface automatically detects and displays:
+
+### pytest Framework
+- Total tests executed
+- Pass/fail counts  
+- Code coverage percentage
+- Failed test details
+
+### Go test Framework
+- Test execution status
+- Performance metrics
+- Error details
+
+### JavaScript Frameworks (Jest/Mocha)
+- Test suite results
+- Coverage reports
+- Failed assertions
+
+### Java Frameworks (JUnit/TestNG)
+- XML result parsing
+- Test method statistics
+- Exception details
+
+## 🗺️ Roadmap
+- [x] **Step 1**: Core Tekton infrastructure
+- [x] **Step 2**: Tekton Triggers and webhooks
+- [x] **Step 3**: GPU pipeline deployment  
+- [x] **Step 4**: Scientific computing workflows
+- [ ] **Step 5**: Production optimization (HA, monitoring, backup)
+
+## 📞 Support
+- **Issue Reporting**: GitHub Issues
+- **Documentation Improvements**: Pull Requests welcome
+- **Technical Discussion**: See troubleshooting documentation
 
 ---
-**注意**: 当前仅完成步骤1，为后续步骤奠定了坚实基础。每个步骤都经过实际环境验证，确保可重现性。
+**Note**: This guide provides a complete, production-tested Tekton installation with GPU-enabled scientific computing capabilities. Each component has been validated in real environments to ensure reproducibility.

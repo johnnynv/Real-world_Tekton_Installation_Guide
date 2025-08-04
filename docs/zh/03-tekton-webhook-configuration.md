@@ -517,16 +517,147 @@ kubectl logs -f -l eventlistener=github-webhook-production -n tekton-pipelines
 - NodePort端口配置
 - 完整的端到端验证流程
 
-## 📚 下一步
+## 🔍 步骤5：验证与测试
 
-Webhook 配置完成后，您可以：
-1. 部署 GPU 科学计算 Pipeline
-2. 配置更复杂的 CI/CD 流程
+### 组件状态检查
+```bash
+# 检查所有组件
+kubectl get secret github-webhook-secret -n tekton-pipelines
+kubectl get eventlistener github-webhook-production -n tekton-pipelines  
+kubectl get pipeline webhook-pipeline -n tekton-pipelines
+kubectl get task git-clone hello-world -n tekton-pipelines
+
+# 运行验证脚本
+chmod +x scripts/utils/verify-step3-webhook-configuration.sh
+./scripts/utils/verify-step3-webhook-configuration.sh
+```
+
+### 网络连接测试
+```bash
+# 内网URL测试
+WEBHOOK_URL="http://webhook.10.34.2.129.nip.io:31960"
+curl -I "$WEBHOOK_URL" --max-time 10
+# 结果: HTTP/1.1 400 Bad Request (正常，因为没有payload)
+
+# 公网IP检查
+PUBLIC_IP=$(curl -s ifconfig.me)
+echo "公网IP: $PUBLIC_IP"
+```
+
+### 功能性测试
+```bash
+# 1. 创建真实GitHub payload
+cat > real-github-payload.json << 'EOF'
+{
+  "ref": "refs/heads/main", 
+  "repository": {
+    "name": "tekton-poc",
+    "clone_url": "https://github.com/johnnynv/tekton-poc.git"
+  },
+  "head_commit": {
+    "id": "def456789abc123",
+    "message": "测试Tekton webhook集成 [trigger]",
+    "author": {
+      "name": "johnnynv",
+      "email": "johnnynv@example.com"
+    }
+  }
+}
+EOF
+
+# 2. 计算HMAC签名
+WEBHOOK_SECRET=$(cat webhook-secret.txt)
+SIGNATURE=$(echo -n "$(cat real-github-payload.json)" | openssl dgst -sha256 -hmac "${WEBHOOK_SECRET}" | cut -d' ' -f2)
+
+# 3. 发送模拟webhook请求
+curl -X POST "${WEBHOOK_URL}" \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: push" \
+  -H "X-Hub-Signature-256: sha256=${SIGNATURE}" \
+  -d @real-github-payload.json \
+  -v
+# 结果: HTTP/1.1 202 Accepted ✅
+
+# 4. 手动Pipeline测试
+cat <<EOF | kubectl create -f -
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: manual-test-webhook-pipeline-run-
+  namespace: tekton-pipelines
+spec:
+  pipelineRef:
+    name: webhook-pipeline
+  params:
+  - name: git-url
+    value: https://github.com/johnnynv/tekton-poc.git
+  - name: git-revision
+    value: main
+  workspaces:
+  - name: shared-data
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+EOF
+# 结果: PipelineRun创建成功并开始运行 ✅
+```
+
+### 验证结果总结
+
+| 组件 | 状态 | 验证方法 | 结果 |
+|------|------|----------|------|
+| **Webhook Secret** | ✅ 正常 | `kubectl get secret github-webhook-secret` | 密钥正确配置 |
+| **EventListener** | ✅ 正常 | HTTP 202响应测试 | 接收webhook请求正常 |
+| **TriggerBinding** | ✅ 正常 | 配置检查 | 参数提取配置正确 |
+| **TriggerTemplate** | ✅ 正常 | 配置检查 | PipelineRun模板正确 |
+| **Pipeline** | ✅ 正常 | 手动PipelineRun测试 | 完全正常运行 |
+| **Tasks** | ✅ 正常 | `kubectl get task` | git-clone, hello-world存在 |
+| **权限配置** | ✅ 正常 | ServiceAccount检查 | tekton-triggers-sa配置正确 |
+| **网络连接** | ⚠️ 部分 | curl测试 | 内网正常，公网受限 |
+
+### 网络配置注意事项
+
+#### 关键发现
+- **内网IP限制：** `10.34.2.129` 无法被GitHub外部访问
+- **NodePort端口：** 必须使用 `:31960` 端口
+- **正确格式：** `http://webhook.PUBLIC_IP.nip.io:31960`
+
+#### 生产环境建议
+- 使用公网IP替代内网IP
+- 配置防火墙规则开放相应端口
+- 考虑使用LoadBalancer或ingress controller
+- 定期监控webhook活动日志
+
+### DDNS解决方案分析
+
+**问题：** 是否可以使用NVIDIA内网Dynamic DNS解决GitHub访问问题？
+
+**分析结果：❌ 不能解决**
+
+**原因：**
+1. **访问方向不匹配**: NVIDIA DDNS设计用于内网主机间通信，不是外网访问内网
+2. **域名范围限制**: 生成的域名仍指向内网IP
+3. **网络架构限制**: GitHub无法解析和访问NVIDIA内网域名
+
+**正确解决方案：**
+- ✅ 公网IP + 防火墙配置（生产环境）
+- ✅ ngrok隧道（开发/测试环境）
+- ✅ LoadBalancer服务（云环境）
+
+## 📚 下一步
 
 **🎯 验证状态：** 
 - ✅ **所有核心功能已验证可用**
 - ✅ **网络问题已识别并有解决方案**  
 - ✅ **完整的故障排除文档已更新**
 - ✅ **可以安全进入下一阶段**
+
+Webhook 配置完成后，您可以：
+1. 部署 GPU 科学计算 Pipeline
+2. 配置更复杂的 CI/CD 流程
 
 继续阅读：[04-gpu-pipeline-deployment.md](04-gpu-pipeline-deployment.md) 
