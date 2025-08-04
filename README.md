@@ -47,6 +47,18 @@ cat docs/en/01-tekton-installation.md
 kubectl apply -f examples/tekton/pipelines/gpu-scrna-analysis-preprocessing-workflow.yaml
 ```
 
+## 🔧 Troubleshooting
+
+### Fix Pipeline Artifacts (If URLs Return 404)
+If you encounter 404 errors when accessing pipeline artifacts or logs:
+
+```bash
+# Fix all pipeline runs automatically
+./scripts/utils/fix-pipeline-artifacts.sh
+```
+
+This script ensures all pipeline runs have proper `artifacts/` and `logs/` directories with all generated files.
+
 ### 5. Access Dashboard
 ```bash
 # Get access URL

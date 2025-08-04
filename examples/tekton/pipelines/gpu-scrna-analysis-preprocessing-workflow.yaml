@@ -84,7 +84,7 @@ spec:
         name: safe-git-clone
       params:
       - name: git-repo-url
-        value: "https://github.com/bp-cicd-org/single-cell-analysis-blueprint.git"
+        value: "https://github.com/NVIDIA-AI-Blueprints/single-cell-analysis-blueprint.git"
       - name: workspace-subdir
         value: "single-cell-analysis-blueprint"
       runAfter: ["step1-container-environment-setup"]
