@@ -12,6 +12,12 @@ spec:
       - Complete workflow with environment setup, analysis, testing, and validation
       - Expected time: 30-60 minutes on A100 GPU
     
+    params:
+    - name: pipeline-run-name
+      type: string
+      default: "unknown-run"
+      description: Name of the current pipeline run
+    
     workspaces:
     - name: shared-storage
       description: Shared workspace simulating Docker writeable directory
@@ -305,7 +311,14 @@ spec:
     
     # Step 9: Final Summary and Validation
     - name: step9-final-summary
+      params:
+      - name: pipeline-run-name
+        value: "$(params.pipeline-run-name)"
       taskSpec:
+        params:
+        - name: pipeline-run-name
+          type: string
+          description: Name of the current pipeline run
         workspaces:
         - name: shared-storage
         steps:
@@ -320,32 +333,9 @@ spec:
             
             cd $(workspaces.shared-storage.path)
             
-            # Get Pipeline Run ID using multiple methods for reliability
-            PIPELINE_RUN_NAME=""
-            PIPELINE_RUN_ID=""
-            
-            # Method 1: Try tekton context
-            if [ -f "/tekton/run/name" ]; then
-              PIPELINE_RUN_NAME=$(cat /tekton/run/name)
-            fi
-            
-            # Method 2: Try from environment variables (Tekton sets these)
-            if [ -z "$PIPELINE_RUN_NAME" ] && [ -n "${TEKTON_PIPELINERUN_NAME:-}" ]; then
-              PIPELINE_RUN_NAME="$TEKTON_PIPELINERUN_NAME"
-            fi
-            
-            # Method 3: Try to extract from pod name/hostname (extract pipeline run name)
-            if [ -z "$PIPELINE_RUN_NAME" ]; then
-              POD_NAME=$(hostname)
-              # Extract pipeline run name from pod name pattern: pipelinerun-stepX-randomhash-pod
-              PIPELINE_RUN_NAME=$(echo "$POD_NAME" | sed 's/-step[0-9]*-[a-z0-9]*-pod$//')
-            fi
-            
-            # Fallback: Generate a unique ID based on timestamp
-            if [ -z "$PIPELINE_RUN_NAME" ] || [ "$PIPELINE_RUN_NAME" = "unknown-run" ]; then
-              TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-              PIPELINE_RUN_NAME="run-${TIMESTAMP}"
-            fi
+            # Get Pipeline Run name from parameter
+            PIPELINE_RUN_NAME="$(params.pipeline-run-name)"
+            echo "✅ Pipeline Run Name: $PIPELINE_RUN_NAME"
             
             # Extract the real Pipeline Run ID (the last part after the last dash)
             # For: gpu-scrna-analysis-preprocessing-workflow-rx462 -> rx462
@@ -442,32 +432,9 @@ spec:
             
             cd $(workspaces.shared-storage.path)
             
-            # Get Pipeline Run info (same logic as step 9a)
-            PIPELINE_RUN_NAME=""
-            PIPELINE_RUN_ID=""
-            
-            # Method 1: Try tekton context
-            if [ -f "/tekton/run/name" ]; then
-              PIPELINE_RUN_NAME=$(cat /tekton/run/name)
-            fi
-            
-            # Method 2: Try from environment variables
-            if [ -z "$PIPELINE_RUN_NAME" ] && [ -n "${TEKTON_PIPELINERUN_NAME:-}" ]; then
-              PIPELINE_RUN_NAME="$TEKTON_PIPELINERUN_NAME"
-            fi
-            
-            # Method 3: Try to extract from pod name/hostname (extract pipeline run name)
-            if [ -z "$PIPELINE_RUN_NAME" ]; then
-              POD_NAME=$(hostname)
-              # Extract pipeline run name from pod name pattern: pipelinerun-stepX-randomhash-pod
-              PIPELINE_RUN_NAME=$(echo "$POD_NAME" | sed 's/-step[0-9]*-[a-z0-9]*-pod$//')
-            fi
-            
-            # Fallback: Generate a unique ID based on timestamp
-            if [ -z "$PIPELINE_RUN_NAME" ] || [ "$PIPELINE_RUN_NAME" = "unknown-run" ]; then
-              TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-              PIPELINE_RUN_NAME="run-${TIMESTAMP}"
-            fi
+            # Get Pipeline Run name from parameter (same as markdown summary step)
+            PIPELINE_RUN_NAME="$(params.pipeline-run-name)"
+            echo "✅ Pipeline Run Name: $PIPELINE_RUN_NAME"
             
             # Extract the real Pipeline Run ID (the last part after the last dash)
             # For: gpu-scrna-analysis-preprocessing-workflow-rx462 -> rx462
@@ -828,6 +795,10 @@ spec:
       - name: shared-storage
         workspace: shared-storage
 
+  params:
+  - name: pipeline-run-name
+    value: "$(context.pipelineRun.name)"
+  
   workspaces:
   - name: shared-storage
     persistentVolumeClaim:
