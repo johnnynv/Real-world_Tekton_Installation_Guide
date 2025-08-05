@@ -87,7 +87,7 @@ echo "   Username: admin, Password: admin123"
 │   │   ├── 02-tekton-triggers-setup.md
 │   │   ├── 03-tekton-webhook-configuration.md
 │   │   └── 04-gpu-pipeline-deployment.md
-│   └── zh/                          # Chinese Documentation (完整中文文档)
+│   └── zh/                          # Chinese Documentation
 ├── scripts/                         # 🛠️ Automation scripts
 │   ├── install/                     # Installation automation
 │   ├── utils/                       # Utility scripts

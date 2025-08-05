@@ -1,0 +1,45 @@
+===============================================
+Tekton Dashboard Restricted User Access Guide
+===============================================
+
+Username: user
+Password: user123
+
+Dashboard URL: http://tekton.10.34.2.129.nip.io
+
+=== Authentication Methods ===
+
+Method 1: Bearer Token Authentication
+- Token: [0;34m[INFO][0m Extracting bearer token...
+eyJhbGciOiJSUzI1NiIsImtpZCI6IndQQU5UeEd5OElOSk41cHBzQnVzQjBMLThWNEFMSUFMelZkcFNnSlpacmsifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJ0ZWt0b24tcGlwZWxpbmVzIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6InRla3Rvbi1yZXN0cmljdGVkLXVzZXItdG9rZW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoidGVrdG9uLXJlc3RyaWN0ZWQtdXNlciIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjUxNzllMmFmLTMzMGUtNDBlZC1iNzdjLTE0NDNmODhiOWU4MiIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZWt0b24tcGlwZWxpbmVzOnRla3Rvbi1yZXN0cmljdGVkLXVzZXIifQ.BBuUpokDSzLm0IHat_4ELyuvFwssonP4CwvjpqS-kaJ4SgqyXd8Mte-yF0wbJQBJ08YHZHbU1PKMZstMN9IkXaNRkxsk-k3fBZs9UauGBUDNnJpkXzFr42pAIQqplJu43yi1qJtD9OfqwEQ6THuwLr-51D4nthhFGsAjgHMN2SWbw6Xnn-5oQT5muJlJzPjidlbh_-qyj-yGOarYm3VcqT6OuRGL8dBoq9iZY1xpsKy2L7Nqa7WjmleAzLu4brkR4LNvXJlF5x-wqBYmQVdesvoX9JVQC4UrV_pS7dvfNozvGQCWPrzd1hYSM3OD9cQp2xXzyjX0RIWTpgcERRP4BA
+- Use this token in Authorization header: "Bearer [0;34m[INFO][0m Extracting bearer token...
+eyJhbGciOiJSUzI1NiIsImtpZCI6IndQQU5UeEd5OElOSk41cHBzQnVzQjBMLThWNEFMSUFMelZkcFNnSlpacmsifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJ0ZWt0b24tcGlwZWxpbmVzIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6InRla3Rvbi1yZXN0cmljdGVkLXVzZXItdG9rZW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoidGVrdG9uLXJlc3RyaWN0ZWQtdXNlciIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjUxNzllMmFmLTMzMGUtNDBlZC1iNzdjLTE0NDNmODhiOWU4MiIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZWt0b24tcGlwZWxpbmVzOnRla3Rvbi1yZXN0cmljdGVkLXVzZXIifQ.BBuUpokDSzLm0IHat_4ELyuvFwssonP4CwvjpqS-kaJ4SgqyXd8Mte-yF0wbJQBJ08YHZHbU1PKMZstMN9IkXaNRkxsk-k3fBZs9UauGBUDNnJpkXzFr42pAIQqplJu43yi1qJtD9OfqwEQ6THuwLr-51D4nthhFGsAjgHMN2SWbw6Xnn-5oQT5muJlJzPjidlbh_-qyj-yGOarYm3VcqT6OuRGL8dBoq9iZY1xpsKy2L7Nqa7WjmleAzLu4brkR4LNvXJlF5x-wqBYmQVdesvoX9JVQC4UrV_pS7dvfNozvGQCWPrzd1hYSM3OD9cQp2xXzyjX0RIWTpgcERRP4BA"
+
+Method 2: Basic Authentication  
+- Username: user
+- Password: user123
+
+=== Accessible Features ===
+✅ Pipelines - View all pipelines
+✅ PipelineRuns - View pipeline execution history
+✅ Tasks - View all tasks
+✅ TaskRuns - View task execution history  
+✅ EventListeners - View trigger configurations
+
+❌ Limited Access:
+- Cannot create/modify/delete resources
+- Cannot access other Kubernetes resources
+- Cannot view secrets or sensitive data
+
+=== Usage Instructions ===
+
+1. Open dashboard: http://tekton.10.34.2.129.nip.io
+2. Login with username/password: user/user123
+3. Or use bearer token for API access
+
+=== API Access Example ===
+curl -H "Authorization: Bearer [0;34m[INFO][0m Extracting bearer token...
+eyJhbGciOiJSUzI1NiIsImtpZCI6IndQQU5UeEd5OElOSk41cHBzQnVzQjBMLThWNEFMSUFMelZkcFNnSlpacmsifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJ0ZWt0b24tcGlwZWxpbmVzIiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6InRla3Rvbi1yZXN0cmljdGVkLXVzZXItdG9rZW4iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoidGVrdG9uLXJlc3RyaWN0ZWQtdXNlciIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjUxNzllMmFmLTMzMGUtNDBlZC1iNzdjLTE0NDNmODhiOWU4MiIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDp0ZWt0b24tcGlwZWxpbmVzOnRla3Rvbi1yZXN0cmljdGVkLXVzZXIifQ.BBuUpokDSzLm0IHat_4ELyuvFwssonP4CwvjpqS-kaJ4SgqyXd8Mte-yF0wbJQBJ08YHZHbU1PKMZstMN9IkXaNRkxsk-k3fBZs9UauGBUDNnJpkXzFr42pAIQqplJu43yi1qJtD9OfqwEQ6THuwLr-51D4nthhFGsAjgHMN2SWbw6Xnn-5oQT5muJlJzPjidlbh_-qyj-yGOarYm3VcqT6OuRGL8dBoq9iZY1xpsKy2L7Nqa7WjmleAzLu4brkR4LNvXJlF5x-wqBYmQVdesvoX9JVQC4UrV_pS7dvfNozvGQCWPrzd1hYSM3OD9cQp2xXzyjX0RIWTpgcERRP4BA" \
+     http://tekton.10.34.2.129.nip.io/api/v1/namespaces/tekton-pipelines/pipelines
+
+===============================================
