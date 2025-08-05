@@ -1,35 +1,35 @@
 #!/bin/bash
 
-# Tekton 步骤3 Webhook 配置验证脚本
-# 验证 GitHub Webhook 密钥、TriggerBinding 和 EventListener 配置
+# Tekton Step 3 Webhook Configuration Verification Script
+# Verify GitHub Webhook secrets, TriggerBinding and EventListener configuration
 
 set -e
 
-echo "🔍 验证 Tekton 步骤3 Webhook 配置..."
+echo "🔍 Verifying Tekton Step 3 Webhook configuration..."
 echo "========================================"
 
-# 检查 Webhook 密钥
-echo "1. 检查 Webhook 密钥配置..."
+# Check Webhook 密钥
+echo "1. Check Webhook 密钥配置..."
 kubectl get secret github-webhook-secret -n tekton-pipelines >/dev/null 2>&1 || {
-    echo "❌ GitHub Webhook Secret 不存在"
-    echo "请先运行: kubectl create secret generic github-webhook-secret --from-literal=webhook-secret=\$WEBHOOK_SECRET -n tekton-pipelines"
+    echo "❌ GitHub Webhook Secret does not exist"
+    echo "Please run first: kubectl create secret generic github-webhook-secret --from-literal=webhook-secret=\$WEBHOOK_SECRET -n tekton-pipelines"
     exit 1
 }
 
-echo "✅ GitHub Webhook Secret 已配置"
+echo "✅ GitHub Webhook Secret configured"
 
-# 检查密钥内容
+# Check密钥内容
 WEBHOOK_SECRET_LENGTH=$(kubectl get secret github-webhook-secret -n tekton-pipelines -o jsonpath='{.data.webhook-secret}' | base64 -d | wc -c)
 if [ "$WEBHOOK_SECRET_LENGTH" -lt 20 ]; then
-    echo "❌ Webhook 密钥长度不足 (当前: $WEBHOOK_SECRET_LENGTH 字符)"
+    echo "❌ Webhook secret length insufficient (current: $WEBHOOK_SECRET_LENGTH characters)"
     exit 1
 fi
 
-echo "✅ Webhook 密钥长度合规 ($WEBHOOK_SECRET_LENGTH 字符)"
+echo "✅ Webhook secret length compliant ($WEBHOOK_SECRET_LENGTH characters)"
 
-# 检查 GitHub TriggerBinding
+# Check GitHub TriggerBinding
 echo ""
-echo "2. 检查 GitHub TriggerBinding..."
+echo "2. Check GitHub TriggerBinding..."
 kubectl get triggerbinding github-webhook-triggerbinding -n tekton-pipelines >/dev/null 2>&1 || {
     echo "❌ GitHub TriggerBinding 不存在"
     exit 1
@@ -37,15 +37,15 @@ kubectl get triggerbinding github-webhook-triggerbinding -n tekton-pipelines >/d
 
 echo "✅ GitHub TriggerBinding 已配置"
 
-# 检查 GitHub EventListener
+# Check GitHub EventListener
 echo ""
-echo "3. 检查 GitHub EventListener..."
+echo "3. Check GitHub EventListener..."
 kubectl get eventlistener github-webhook-eventlistener -n tekton-pipelines >/dev/null 2>&1 || {
     echo "❌ GitHub EventListener 不存在"
     exit 1
 }
 
-# 检查 EventListener 状态
+# Check EventListener 状态
 GITHUB_EL_READY=$(kubectl get eventlistener github-webhook-eventlistener -n tekton-pipelines -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null)
 if [ "$GITHUB_EL_READY" != "True" ]; then
     echo "❌ GitHub EventListener 未就绪"
@@ -55,9 +55,9 @@ fi
 
 echo "✅ GitHub EventListener 就绪"
 
-# 检查 EventListener Pod
+# Check EventListener Pod
 echo ""
-echo "4. 检查 GitHub EventListener Pod..."
+echo "4. Check GitHub EventListener Pod..."
 GITHUB_EL_POD=$(kubectl get pods -n tekton-pipelines -l eventlistener=github-webhook-eventlistener --no-headers | awk '{print $1}')
 if [ -z "$GITHUB_EL_POD" ]; then
     echo "❌ GitHub EventListener Pod 不存在"
@@ -73,9 +73,9 @@ fi
 
 echo "✅ GitHub EventListener Pod 运行正常"
 
-# 检查 Webhook 拦截器配置
+# Check Webhook 拦截器配置
 echo ""
-echo "5. 检查 Webhook 拦截器配置..."
+echo "5. Check Webhook 拦截器配置..."
 INTERCEPTOR_CONFIG=$(kubectl get eventlistener github-webhook-eventlistener -n tekton-pipelines -o jsonpath='{.spec.triggers[0].interceptors}' 2>/dev/null)
 if [ -z "$INTERCEPTOR_CONFIG" ] || [ "$INTERCEPTOR_CONFIG" = "null" ]; then
     echo "⚠️ 未检测到拦截器配置，请确认是否需要 GitHub Webhook 验证"
@@ -83,9 +83,9 @@ else
     echo "✅ Webhook 拦截器配置已存在"
 fi
 
-# 检查服务访问配置
+# Check服务访问配置
 echo ""
-echo "6. 检查 EventListener 服务配置..."
+echo "6. Check EventListener 服务配置..."
 GITHUB_EL_SVC=$(kubectl get svc -n tekton-pipelines -l eventlistener=github-webhook-eventlistener --no-headers | awk '{print $1}')
 if [ -z "$GITHUB_EL_SVC" ]; then
     echo "❌ GitHub EventListener 服务不存在"
@@ -126,9 +126,9 @@ else
     echo "⚠️ EventListener 连通性测试返回: HTTP $TEST_RESULT"
 fi
 
-# 检查 webhook-secret.txt 文件
+# Check webhook-secret.txt 文件
 echo ""
-echo "8. 检查配置文件..."
+echo "8. Check配置文件..."
 if [ -f "webhook-secret.txt" ]; then
     echo "✅ webhook-secret.txt 文件存在"
     echo "📝 GitHub Webhook 配置所需的密钥已保存"

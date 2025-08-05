@@ -1,126 +1,126 @@
 #!/bin/bash
 
-# Tekton 步骤4 GPU Pipeline 部署验证脚本
-# 验证 GPU 环境、Pipeline 部署和完整工作流
+# Tekton Step 4 GPU Pipeline Deployment Verification Script
+# Verify GPU environment, Pipeline deployment and complete workflow
 
 set -e
 
-echo "🔍 验证 Tekton 步骤4 GPU Pipeline 部署..."
-echo "========================================"
+echo "🔍 Verifying Tekton Step 4 GPU Pipeline deployment..."
+echo "==========================================="
 
-# 检查 GPU 环境
-echo "1. 检查 GPU 环境..."
+# Check GPU environment
+echo "1. Checking GPU environment..."
 
-# 检查 GPU 节点
+# Check GPU nodes
 GPU_NODES=$(kubectl get nodes -l accelerator=nvidia-tesla-gpu --no-headers 2>/dev/null | wc -l)
 if [ "$GPU_NODES" -eq 0 ]; then
-    echo "⚠️ 未找到带有 accelerator=nvidia-tesla-gpu 标签的节点"
-    echo "检查是否有其他GPU节点标签..."
+    echo "⚠️ No nodes with accelerator=nvidia-tesla-gpu label found"
+    echo "Checking for other GPU node labels..."
     
-    # 检查替代的GPU标签
+    # Check alternative GPU labels
     ALT_GPU_NODES=$(kubectl get nodes -o json | jq -r '.items[] | select(.status.capacity."nvidia.com/gpu") | .metadata.name' 2>/dev/null | wc -l)
     if [ "$ALT_GPU_NODES" -gt 0 ]; then
-        echo "✅ 找到 $ALT_GPU_NODES 个GPU节点 (nvidia.com/gpu)"
+        echo "✅ Found $ALT_GPU_NODES GPU nodes (nvidia.com/gpu)"
         kubectl get nodes -o custom-columns="NAME:.metadata.name,GPU:.status.capacity.nvidia\.com/gpu" | grep -v '<none>'
     else
-        echo "❌ 未找到任何GPU节点"
-        echo "💡 请确保安装了 NVIDIA GPU Operator 或配置了 GPU 节点"
+        echo "❌ No GPU nodes found"
+        echo "💡 Please ensure NVIDIA GPU Operator is installed or GPU nodes are configured"
     fi
 else
-    echo "✅ 找到 $GPU_NODES 个GPU节点"
+    echo "✅ Found $GPU_NODES GPU nodes"
     kubectl get nodes -l accelerator=nvidia-tesla-gpu
 fi
 
-# 检查 GitHub Token Secret
+# Check GitHub Token Secret
 echo ""
-echo "2. 检查 GitHub Token 配置..."
+echo "2. Checking GitHub Token configuration..."
 kubectl get secret github-token -n tekton-pipelines >/dev/null 2>&1 || {
-    echo "❌ GitHub Token Secret 不存在"
-    echo "请先运行: kubectl create secret generic github-token --from-literal=token=your-github-token -n tekton-pipelines"
+    echo "❌ GitHub Token Secret does not exist"
+    echo "Please run first: kubectl create secret generic github-token --from-literal=token=your-github-token -n tekton-pipelines"
     exit 1
 }
 
-echo "✅ GitHub Token Secret 已配置"
+echo "✅ GitHub Token Secret configured"
 
-# 检查 GPU Pipeline 相关资源
+# Check GPU Pipeline related resources
 echo ""
-echo "3. 检查 GPU Pipeline 资源..."
+echo "3. Checking GPU Pipeline resources..."
 
-# 检查 Pipeline 定义
+# Check Pipeline definitions
 PIPELINE_COUNT=0
 for pipeline in "gpu-real-8-step-workflow-lite" "gpu-real-8-step-workflow-original" "rmm-simple-verification-test"; do
     if kubectl get pipeline $pipeline -n tekton-pipelines >/dev/null 2>&1; then
-        echo "✅ Pipeline '$pipeline' 已部署"
+        echo "✅ Pipeline '$pipeline' deployed"
         ((PIPELINE_COUNT++))
     else
-        echo "⚠️ Pipeline '$pipeline' 未部署"
+        echo "⚠️ Pipeline '$pipeline' not deployed"
     fi
 done
 
 if [ "$PIPELINE_COUNT" -eq 0 ]; then
-    echo "❌ 未找到任何 GPU Pipeline"
-    echo "请先部署 Pipeline: kubectl apply -f examples/production/pipelines/"
+    echo "❌ No GPU Pipelines found"
+    echo "Please deploy Pipelines first: kubectl apply -f examples/production/pipelines/"
     exit 1
 fi
 
-echo "✅ 找到 $PIPELINE_COUNT 个 GPU Pipeline"
+echo "✅ Found $PIPELINE_COUNT GPU Pipelines"
 
-# 检查 Task 资源
+# Check Task resources
 echo ""
-echo "4. 检查 GPU Task 资源..."
+echo "4. Checking GPU Task resources..."
 TASK_COUNT=0
 for task in "gpu-papermill-production-init-rmm-fixed" "safe-git-clone-task" "jupyter-nbconvert-task" "pytest-execution-task"; do
     if kubectl get task $task -n tekton-pipelines >/dev/null 2>&1; then
-        echo "✅ Task '$task' 已部署"
+        echo "✅ Task '$task' deployed"
         ((TASK_COUNT++))
     else
-        echo "⚠️ Task '$task' 未部署"
+        echo "⚠️ Task '$task' not deployed"
     fi
 done
 
-echo "✅ 找到 $TASK_COUNT 个相关 Task"
+echo "✅ Found $TASK_COUNT related Tasks"
 
-# 检查 PVC 配置
+# Check PVC configuration
 echo ""
-echo "5. 检查持久存储配置..."
+echo "5. Checking persistent storage configuration..."
 if kubectl get pvc shared-workspace -n tekton-pipelines >/dev/null 2>&1; then
     PVC_STATUS=$(kubectl get pvc shared-workspace -n tekton-pipelines -o jsonpath='{.status.phase}')
     if [ "$PVC_STATUS" = "Bound" ]; then
-        echo "✅ PVC 'shared-workspace' 状态: $PVC_STATUS"
+        echo "✅ PVC 'shared-workspace' status: $PVC_STATUS"
         PVC_SIZE=$(kubectl get pvc shared-workspace -n tekton-pipelines -o jsonpath='{.spec.resources.requests.storage}')
-        echo "✅ PVC 大小: $PVC_SIZE"
+        echo "✅ PVC size: $PVC_SIZE"
     else
-        echo "❌ PVC 'shared-workspace' 状态异常: $PVC_STATUS"
+        echo "❌ PVC 'shared-workspace' status abnormal: $PVC_STATUS"
     fi
 else
-    echo "⚠️ PVC 'shared-workspace' 不存在"
-    echo "💡 GPU Pipeline 需要持久存储来保存工作流状态"
+    echo "⚠️ PVC 'shared-workspace' does not exist"
+    echo "💡 GPU Pipeline requires persistent storage to save workflow state"
 fi
 
-# 检查最近的 PipelineRun
+# Check recent PipelineRuns
 echo ""
-echo "6. 检查 Pipeline 执行历史..."
+echo "6. Checking Pipeline execution history..."
 RECENT_RUNS=$(kubectl get pipelineruns -n tekton-pipelines --sort-by=.metadata.creationTimestamp 2>/dev/null | tail -5)
 if [ -n "$RECENT_RUNS" ]; then
-    echo "✅ 最近的 PipelineRun:"
+    echo "✅ Recent PipelineRuns:"
     echo "$RECENT_RUNS"
     
-    # 检查最新运行状态
+    # Check latest run status
     LATEST_RUN=$(kubectl get pipelineruns -n tekton-pipelines --sort-by=.metadata.creationTimestamp --no-headers 2>/dev/null | tail -1 | awk '{print $1}')
     if [ -n "$LATEST_RUN" ] && [ "$LATEST_RUN" != "NAME" ]; then
         RUN_STATUS=$(kubectl get pipelinerun $LATEST_RUN -n tekton-pipelines -o jsonpath='{.status.conditions[0].reason}' 2>/dev/null)
-        echo "✅ 最新运行状态: $RUN_STATUS"
+        echo "✅ Latest run status: $RUN_STATUS"
     fi
 else
-    echo "⚠️ 未找到 PipelineRun 历史"
-    echo "💡 运行 Pipeline 来验证完整工作流"
+    echo "⚠️ No PipelineRun history found"
+    echo "💡 Run Pipeline to verify complete workflow"
 fi
 
-# 检查 GPU 可用性测试
+# Check GPU availability test
 echo ""
-echo "7. 测试 GPU 可用性..."
+echo "7. Testing GPU availability..."
 if [ "$ALT_GPU_NODES" -gt 0 ] || [ "$GPU_NODES" -gt 0 ]; then
-    echo "正在测试 GPU 访问..."
+    echo "Testing GPU access..."
     
     GPU_TEST_RESULT=$(kubectl run gpu-test-verify --rm -i --restart=Never \
         --image=nvidia/cuda:12.2-runtime-ubuntu22.04 \
@@ -129,61 +129,61 @@ if [ "$ALT_GPU_NODES" -gt 0 ] || [ "$GPU_NODES" -gt 0 ]; then
         -- nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "failed")
     
     if [ "$GPU_TEST_RESULT" != "failed" ] && [ -n "$GPU_TEST_RESULT" ]; then
-        echo "✅ GPU 测试成功:"
+        echo "✅ GPU test successful:"
         echo "$GPU_TEST_RESULT"
     else
-        echo "❌ GPU 测试失败"
-        echo "💡 请检查 GPU 节点调度和 NVIDIA 运行时配置"
+        echo "❌ GPU test failed"
+        echo "💡 Please check GPU node scheduling and NVIDIA runtime configuration"
     fi
 else
-    echo "⚠️ 跳过 GPU 测试 (无可用 GPU 节点)"
+    echo "⚠️ Skipping GPU test (no available GPU nodes)"
 fi
 
-# 检查必要的命名空间权限
+# Check necessary namespace permissions
 echo ""
-echo "8. 检查权限配置..."
+echo "8. Checking permission configuration..."
 RBAC_CHECK=$(kubectl auth can-i create pipelineruns --as=system:serviceaccount:tekton-pipelines:default -n tekton-pipelines 2>/dev/null && echo "ok" || echo "failed")
 if [ "$RBAC_CHECK" = "ok" ]; then
-    echo "✅ RBAC 权限配置正确"
+    echo "✅ RBAC permission configuration correct"
 else
-    echo "⚠️ RBAC 权限可能需要调整"
+    echo "⚠️ RBAC permissions may need adjustment"
 fi
 
-# 生成部署建议
+# Generate deployment recommendations
 echo ""
-echo "========================================"
-echo "✅ Tekton 步骤4 GPU Pipeline 验证完成！"
+echo "=========================================="
+echo "✅ Tekton Step 4 GPU Pipeline verification completed!"
 echo ""
-echo "📋 验证结果概览:"
+echo "📋 Verification results overview:"
 if [ "$GPU_NODES" -gt 0 ] || [ "$ALT_GPU_NODES" -gt 0 ]; then
-    echo "  ✅ GPU 环境可用"
+    echo "  ✅ GPU environment available"
 else
-    echo "  ⚠️ GPU 环境需要配置"
+    echo "  ⚠️ GPU environment needs configuration"
 fi
-echo "  ✅ GitHub Token 配置"
-echo "  ✅ Pipeline 资源 ($PIPELINE_COUNT 个)"
-echo "  ✅ Task 资源 ($TASK_COUNT 个)"
-echo "  ✅ 权限配置"
+echo "  ✅ GitHub Token configuration"
+echo "  ✅ Pipeline resources ($PIPELINE_COUNT items)"
+echo "  ✅ Task resources ($TASK_COUNT items)"
+echo "  ✅ Permission configuration"
 echo ""
 
-# 提供下一步建议
+# Provide next step recommendations
 if [ "$PIPELINE_COUNT" -gt 0 ]; then
-    echo "🚀 推荐的下一步操作:"
-    echo "  1. 运行轻量级验证:"
+    echo "🚀 Recommended next steps:"
+    echo "  1. Run lightweight verification:"
     echo "     kubectl create -f examples/production/pipelines/rmm-simple-verification-test.yaml"
     echo ""
-    echo "  2. 运行完整工作流 (测试版):"
+    echo "  2. Run complete workflow (test version):"
     echo "     kubectl create -f examples/production/pipelines/gpu-real-8-step-workflow-lite.yaml"
     echo ""
-    echo "  3. 监控执行状态:"
+    echo "  3. Monitor execution status:"
     echo "     kubectl get pipelineruns -n tekton-pipelines -w"
     echo ""
-    echo "  4. 查看执行日志:"
+    echo "  4. View execution logs:"
     echo "     tkn pipelinerun logs -f -n tekton-pipelines"
 else
-    echo "🔧 需要先部署 Pipeline:"
+    echo "🔧 Need to deploy Pipeline first:"
     echo "  kubectl apply -f examples/production/pipelines/"
 fi
 
 echo ""
-echo "📊 系统已准备就绪，可以运行 GPU 加速的科学计算工作流！" 
+echo "📊 System is ready, can run GPU-accelerated scientific computing workflows!" 
