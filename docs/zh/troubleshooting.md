@@ -1330,9 +1330,191 @@ kubectl describe nodes > nodes-info.txt
 
 ---
 
-**更新时间**：2025-07-28  
+## 16. Tekton Dashboard 受限用户权限配置问题 (重要案例)
+
+### 问题：Dashboard 登录成功但权限未生效
+**现象**：
+- 可以用 user/user123 成功登录 Dashboard
+- 登录后仍然可以看到"Create"按钮和所有菜单项
+- 权限限制似乎没有生效
+
+### 完整诊断和解决流程
+
+#### 问题1：Dashboard无法访问 (HTTP 503)
+**错误信息**：
+```
+HTTP 503 Service Temporarily Unavailable
+```
+
+**根本原因**：基本认证Secret配置错误
+- Secret中的key名称使用了 `users.htpasswd` 
+- Nginx Ingress期望的key名称是 `auth`
+
+**解决方案**：
+```bash
+# 1. 提取现有的htpasswd内容
+HTPASSWD_CONTENT=$(kubectl get secret tekton-dashboard-auth -n tekton-pipelines -o jsonpath='{.data.users\.htpasswd}' | base64 -d)
+
+# 2. 删除错误的Secret
+kubectl delete secret tekton-dashboard-auth -n tekton-pipelines
+
+# 3. 重新创建正确的Secret
+kubectl create secret generic tekton-dashboard-auth \
+  --from-literal=auth="$HTPASSWD_CONTENT" \
+  -n tekton-pipelines
+
+# 4. 验证修复
+curl -k -u "user:user123" https://tekton.10.34.2.129.nip.io/
+```
+
+#### 问题2：Dashboard权限配置错误
+**现象**：登录成功但可以看到Create按钮
+
+**根本原因**：Dashboard ServiceAccount权限过高
+- `tekton-dashboard` ServiceAccount绑定了高权限ClusterRole
+- 这些ClusterRole具有 `[*]` 全权限，而不是受限的只读权限
+
+**解决方案**：
+```bash
+# 1. 删除高权限绑定
+kubectl delete clusterrolebinding tekton-dashboard-backend-edit
+kubectl delete clusterrolebinding tekton-dashboard-pipelines-view  
+kubectl delete clusterrolebinding tekton-dashboard-tenant-view
+kubectl delete clusterrolebinding tekton-dashboard-triggers-view
+
+# 2. 创建受限权限绑定
+kubectl create clusterrolebinding tekton-dashboard-restricted \
+  --clusterrole=tekton-restricted-viewer \
+  --serviceaccount=tekton-pipelines:tekton-dashboard
+
+# 3. 重启Dashboard应用权限
+kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
+kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
+```
+
+#### 问题3：Dashboard仍显示未授权菜单项
+**现象**：虽然Create按钮消失，但仍能看到"其他菜单"
+
+**根本原因分析**：
+1. **Dashboard只读模式未启用**：`--read-only=false` 允许UI显示编辑功能
+2. **ClusterRole权限过宽**：`tekton-restricted-viewer` 仍包含对Triggers相关资源的权限
+
+**完整解决方案**：
+```bash
+# 1. 启用Dashboard只读模式
+kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
+  {
+    "op": "replace", 
+    "path": "/spec/template/spec/containers/0/args",
+    "value": [
+      "--default-namespace=",
+      "--external-logs=", 
+      "--log-format=json",
+      "--log-level=info",
+      "--logout-url=",
+      "--namespaces=",
+      "--pipelines-namespace=tekton-pipelines",
+      "--port=9097",
+      "--read-only=true",
+      "--stream-logs=true", 
+      "--triggers-namespace=tekton-pipelines"
+    ]
+  }
+]'
+
+# 2. 更新ClusterRole为更严格的权限
+kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-restricted-viewer
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: tekton-dashboard
+rules:
+# 只允许访问基础Tekton资源
+- apiGroups: ["tekton.dev"]
+  resources: ["pipelines", "pipelineruns", "tasks", "taskruns", "eventlisteners"]
+  verbs: ["get", "list", "watch"]
+# 基础Kubernetes资源
+- apiGroups: [""]
+  resources: ["configmaps", "namespaces", "pods", "pods/log"]
+  verbs: ["get", "list", "watch"]
+EOF
+
+# 3. 重启Dashboard
+kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
+kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
+```
+
+### 验证权限限制
+
+**权限测试命令**：
+```bash
+# 测试Dashboard ServiceAccount权限
+kubectl auth can-i list triggers.triggers.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard
+# 应该返回: no
+
+kubectl auth can-i list clustertasks.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard  
+# 应该返回: no
+```
+
+### 重要行为说明
+
+**✅ 正常的Dashboard行为**：
+- **菜单静态显示**：所有菜单项都会显示，这是Tekton Dashboard的设计
+- **权限在点击时验证**：访问受限资源时会显示权限错误或空列表
+- **只读模式生效**：不显示Create、Edit、Delete等操作按钮
+
+**🧪 用户验证步骤**：
+1. **刷新浏览器页面** (Ctrl+F5)
+2. **点击受限菜单项**验证权限：
+   - Triggers → 应显示权限错误
+   - ClusterTasks → 应显示权限错误  
+   - CustomRuns → 应显示权限错误
+3. **确认允许的菜单项**正常显示：
+   - Pipelines ✅
+   - PipelineRuns ✅  
+   - Tasks ✅
+   - TaskRuns ✅
+   - EventListeners ✅
+
+### 关键配置文件
+
+**受限用户RBAC配置** (`examples/config/rbac/rbac-step5-tekton-restricted-user.yaml`):
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-restricted-viewer
+rules:
+- apiGroups: ["tekton.dev"]
+  resources: ["pipelines", "pipelineruns", "tasks", "taskruns", "eventlisteners"]
+  verbs: ["get", "list", "watch"]
+```
+
+**基本认证配置**：
+```bash
+# 正确的Secret格式
+kubectl create secret generic tekton-dashboard-auth \
+  --from-literal=auth="user:$2y$10$..." \
+  -n tekton-pipelines
+```
+
+### 状态
+
+- ✅ **HTTP 503问题**：已解决 (Secret key修正)
+- ✅ **权限过高问题**：已解决 (ClusterRole限制)  
+- ✅ **菜单显示问题**：已解决 (只读模式+权限细化)
+- ✅ **访问验证**：已确认权限按预期工作
+
+**重要结论**：Tekton Dashboard的菜单是静态显示的，权限限制在API访问层面生效。这是正常的设计行为，确保了UI一致性的同时实现了有效的访问控制。
+
+---
+
+**更新时间**：2025-01-02  
 **维护者**：Tekton GPU Pipeline Team  
-**重要案例**：GPU访问问题、Workspace绑定冲突 
+**重要案例**：GPU访问问题、Workspace绑定冲突、Dashboard权限配置
 
 ---
 
