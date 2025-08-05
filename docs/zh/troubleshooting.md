@@ -1510,6 +1510,138 @@ kubectl create secret generic tekton-dashboard-auth \
 
 **重要结论**：Tekton Dashboard的菜单是静态显示的，权限限制在API访问层面生效。这是正常的设计行为，确保了UI一致性的同时实现了有效的访问控制。
 
+#### 问题4：Admin用户权限被误限制
+**现象**：修复受限用户后，admin用户也无法看到Create按钮
+
+**根本原因**：在修复user权限时，Dashboard ServiceAccount被限制为只读权限，影响了所有用户包括admin
+
+**解决方案**：
+```bash
+# 1. 创建完整管理权限ClusterRole
+kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-dashboard-admin
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: tekton-dashboard
+rules:
+# Tekton 资源完整权限
+- apiGroups: ["tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["triggers.tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+# Kubernetes 核心资源权限
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "pods/log", "events", "configmaps", "secrets", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+EOF
+
+# 2. 更新Dashboard ServiceAccount权限绑定
+kubectl delete clusterrolebinding tekton-dashboard-restricted
+kubectl create clusterrolebinding tekton-dashboard-admin \
+  --clusterrole=tekton-dashboard-admin \
+  --serviceaccount=tekton-pipelines:tekton-dashboard
+
+# 3. 禁用只读模式，启用完整功能
+kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
+  {
+    "op": "replace", 
+    "path": "/spec/template/spec/containers/0/args",
+    "value": [
+      "--default-namespace=",
+      "--external-logs=", 
+      "--log-format=json",
+      "--log-level=info",
+      "--logout-url=",
+      "--namespaces=",
+      "--pipelines-namespace=tekton-pipelines",
+      "--port=9097",
+      "--read-only=false",
+      "--stream-logs=true", 
+      "--triggers-namespace=tekton-pipelines"
+    ]
+  }
+]'
+
+# 4. 重启Dashboard应用更改
+kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
+kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
+```
+
+**验证admin权限恢复**：
+```bash
+# 测试管理权限
+kubectl auth can-i create pipelines.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard
+# 应该返回: yes
+
+kubectl auth can-i delete pipelineruns.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard  
+# 应该返回: yes
+```
+
+#### 问题5：Admin用户登录凭据丢失
+**现象**：admin / admin123 无法登录，显示认证失败
+
+**根本原因**：在重新创建认证Secret时，只保留了user用户信息，遗漏了admin用户
+
+**解决方案**：
+```bash
+# 1. 生成admin用户密码hash
+htpasswd -nbB admin admin123
+# 输出: admin:$2y$05$1Sw1dzYQu4847hA0RVhJNuOfukIdCgCy4uTM3480ZrOTVmwE2MjXS
+
+# 2. 创建包含两个用户的htpasswd文件
+cat > /tmp/htpasswd_combined << 'EOF'
+admin:$2y$05$1Sw1dzYQu4847hA0RVhJNuOfukIdCgCy4uTM3480ZrOTVmwE2MjXS
+user:$apr1$U0O.x6U3$P9Ed5mlwqKCvQZoz6bilG/
+EOF
+
+# 3. 重新创建认证Secret
+kubectl delete secret tekton-dashboard-auth -n tekton-pipelines
+kubectl create secret generic tekton-dashboard-auth \
+  --from-file=auth=/tmp/htpasswd_combined \
+  -n tekton-pipelines
+
+# 4. 清理临时文件
+rm /tmp/htpasswd_combined
+```
+
+**验证两个用户都可登录**：
+```bash
+# 测试admin登录
+curl -k -u "admin:admin123" -s -o /dev/null -w "Admin status: %{http_code}\n" https://tekton.10.34.2.129.nip.io/
+
+# 测试user登录  
+curl -k -u "user:user123" -s -o /dev/null -w "User status: %{http_code}\n" https://tekton.10.34.2.129.nip.io/
+# 都应该返回: 200
+```
+
+### 最终用户权限配置
+
+**正确的双用户配置**：
+
+| 用户名 | 密码 | Dashboard权限 | 后端权限 | 功能描述 |
+|--------|------|---------------|----------|----------|
+| `admin` | `admin123` | 完整管理权限 | tekton-dashboard-admin | 可创建、编辑、删除所有资源 |
+| `user` | `user123` | 受限只读权限 | 通过菜单点击权限检查 | 只能查看允许的资源，受限资源显示权限错误 |
+
+**重要架构理解**：
+- **认证层面**：通过Nginx Basic Auth控制谁可以登录
+- **授权层面**：Dashboard ServiceAccount决定后端API权限
+- **用户体验**：不同用户看到相同菜单，但访问权限不同
+
 ---
 
 **更新时间**：2025-01-02  

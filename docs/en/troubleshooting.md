@@ -517,6 +517,138 @@ kubectl create secret generic tekton-dashboard-auth \
 
 **Important conclusion**: Tekton Dashboard's menu is statically displayed, permission restrictions take effect at the API access level. This is normal design behavior that ensures UI consistency while implementing effective access control.
 
+#### Problem 4: Admin user permissions incorrectly restricted
+**Symptoms**: After fixing restricted user, admin user also cannot see Create buttons
+
+**Root Cause**: During user permission fixing, Dashboard ServiceAccount was restricted to read-only permissions, affecting all users including admin
+
+**Solution**:
+```bash
+# 1. Create comprehensive admin ClusterRole
+kubectl apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-dashboard-admin
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/part-of: tekton-dashboard
+rules:
+# Tekton resources full permissions
+- apiGroups: ["tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+- apiGroups: ["triggers.tekton.dev"]
+  resources: ["*"]
+  verbs: ["*"]
+# Kubernetes core resource permissions
+- apiGroups: [""]
+  resources: ["namespaces", "pods", "pods/log", "events", "configmaps", "secrets", "services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["apiextensions.k8s.io"]
+  resources: ["customresourcedefinitions"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["*"]
+  verbs: ["get", "list"]
+EOF
+
+# 2. Update Dashboard ServiceAccount permission binding
+kubectl delete clusterrolebinding tekton-dashboard-restricted
+kubectl create clusterrolebinding tekton-dashboard-admin \
+  --clusterrole=tekton-dashboard-admin \
+  --serviceaccount=tekton-pipelines:tekton-dashboard
+
+# 3. Disable read-only mode, enable full functionality
+kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
+  {
+    "op": "replace", 
+    "path": "/spec/template/spec/containers/0/args",
+    "value": [
+      "--default-namespace=",
+      "--external-logs=", 
+      "--log-format=json",
+      "--log-level=info",
+      "--logout-url=",
+      "--namespaces=",
+      "--pipelines-namespace=tekton-pipelines",
+      "--port=9097",
+      "--read-only=false",
+      "--stream-logs=true", 
+      "--triggers-namespace=tekton-pipelines"
+    ]
+  }
+]'
+
+# 4. Restart Dashboard to apply changes
+kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
+kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
+```
+
+**Verify admin permissions restored**:
+```bash
+# Test management permissions
+kubectl auth can-i create pipelines.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard
+# Should return: yes
+
+kubectl auth can-i delete pipelineruns.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard  
+# Should return: yes
+```
+
+#### Problem 5: Admin user login credentials lost
+**Symptoms**: admin / admin123 cannot login, shows authentication failure
+
+**Root Cause**: When recreating authentication Secret, only user information was preserved, admin user was omitted
+
+**Solution**:
+```bash
+# 1. Generate admin user password hash
+htpasswd -nbB admin admin123
+# Output: admin:$2y$05$1Sw1dzYQu4847hA0RVhJNuOfukIdCgCy4uTM3480ZrOTVmwE2MjXS
+
+# 2. Create htpasswd file containing both users
+cat > /tmp/htpasswd_combined << 'EOF'
+admin:$2y$05$1Sw1dzYQu4847hA0RVhJNuOfukIdCgCy4uTM3480ZrOTVmwE2MjXS
+user:$apr1$U0O.x6U3$P9Ed5mlwqKCvQZoz6bilG/
+EOF
+
+# 3. Recreate authentication Secret
+kubectl delete secret tekton-dashboard-auth -n tekton-pipelines
+kubectl create secret generic tekton-dashboard-auth \
+  --from-file=auth=/tmp/htpasswd_combined \
+  -n tekton-pipelines
+
+# 4. Clean up temporary file
+rm /tmp/htpasswd_combined
+```
+
+**Verify both users can login**:
+```bash
+# Test admin login
+curl -k -u "admin:admin123" -s -o /dev/null -w "Admin status: %{http_code}\n" https://tekton.10.34.2.129.nip.io/
+
+# Test user login  
+curl -k -u "user:user123" -s -o /dev/null -w "User status: %{http_code}\n" https://tekton.10.34.2.129.nip.io/
+# Both should return: 200
+```
+
+### Final User Permission Configuration
+
+**Correct dual-user configuration**:
+
+| Username | Password | Dashboard Permissions | Backend Permissions | Functionality |
+|----------|----------|----------------------|---------------------|---------------|
+| `admin` | `admin123` | Full admin permissions | tekton-dashboard-admin | Can create, edit, delete all resources |
+| `user` | `user123` | Restricted read-only | Via menu click permission check | Can only view allowed resources, restricted resources show permission errors |
+
+**Important architecture understanding**:
+- **Authentication level**: Nginx Basic Auth controls who can login
+- **Authorization level**: Dashboard ServiceAccount determines backend API permissions  
+- **User experience**: Different users see same menus, but have different access permissions
+
 ---
 
 **Note**: This troubleshooting guide covers real-world issues encountered during production deployments. Each solution has been tested and validated.
