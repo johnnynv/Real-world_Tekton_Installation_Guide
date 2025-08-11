@@ -5,7 +5,6 @@ This document lists the minimum and production-level hardware requirements for i
 ## 1. Without GPU
 
 ### 1. Minimum Hardware Requirements
-
 - CPU: 2 cores
 - Memory: 4 GB
 - Storage: 20 GB
@@ -13,7 +12,6 @@ This document lists the minimum and production-level hardware requirements for i
 - Number of nodes: 1 (single-node test environment)
 
 ### 2. Production-Level Hardware Requirements
-
 - CPU: 4 cores or more
 - Memory: 16 GB or more
 - Storage: 100 GB or more (SSD recommended)
@@ -23,7 +21,6 @@ This document lists the minimum and production-level hardware requirements for i
 ## 2. With GPU
 
 ### 1. Minimum Hardware Requirements
-
 - CPU: 4 cores
 - Memory: 16 GB
 - Storage: 50 GB
@@ -32,7 +29,6 @@ This document lists the minimum and production-level hardware requirements for i
 - Number of nodes: 1 (single-node test environment)
 
 ### 2. Production-Level Hardware Requirements
-
 - CPU: 8 cores or more
 - Memory: 64 GB or more
 - Storage: 500 GB or more (SSD recommended)
