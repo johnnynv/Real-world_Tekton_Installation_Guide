@@ -14,7 +14,7 @@ This guide provides detailed instructions for deploying battle-tested GPU-accele
 ## 🔧 Prerequisites
 
 ### System Requirements
-- ✅ Completed [Tekton Webhook Configuration](03-tekton-webhook-configuration.md)
+- ✅ Completed [Tekton Webhook Configuration](06-tekton-webhook-configuration.md)
 - ✅ Kubernetes cluster with GPU support (Recommended: 8GB+ GPU memory)
 - ✅ NVIDIA GPU Operator installed
 - ✅ Persistent storage support (at least 50GB)

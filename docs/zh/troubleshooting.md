@@ -2832,10 +2832,10 @@ Task1[
 
 ## 📁 相关文档
 
-- [Tekton 安装指南](01-tekton-installation.md)
-- [Triggers 配置指南](02-tekton-triggers-setup.md)  
-- [Webhook 配置指南](03-tekton-webhook-configuration.md)
-- [GPU Pipeline 部署指南](04-gpu-pipeline-deployment.md)
+- [Tekton 安装指南](04-tekton-installation.md)
+- [Triggers 配置指南](05-tekton-triggers-setup.md)  
+- [Webhook 配置指南](06-tekton-webhook-configuration.md)
+- [GPU Pipeline 部署指南](07-gpu-pipeline-deployment.md)
 
 ---
 

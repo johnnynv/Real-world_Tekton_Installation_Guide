@@ -445,4 +445,4 @@ kubectl logs -n ingress-nginx deploy/ingress-nginx-controller --tail=10
 2. 设置 GitHub Webhooks（CI/CD 集成）  
 3. 部署 GPU Pipeline（科学计算工作流）
 
-继续阅读：[02-tekton-triggers-setup.md](02-tekton-triggers-setup.md) 
+继续阅读：[05-tekton-triggers-setup.md](05-tekton-triggers-setup.md) 

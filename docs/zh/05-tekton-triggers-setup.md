@@ -11,7 +11,7 @@
 
 ## 🔧 前提条件
 
-- ✅ 已完成 [Tekton 核心安装](01-tekton-installation.md)
+- ✅ 已完成 [Tekton 核心安装](04-tekton-installation.md)
 - ✅ Tekton Pipelines 正常运行
 - ✅ kubectl 访问权限
 
@@ -354,4 +354,4 @@ Triggers 配置完成后，您可以：
 1. 配置 GitHub Webhooks（自动化 CI/CD）
 2. 部署 GPU 科学计算 Pipeline
 
-继续阅读：[03-tekton-webhook-configuration.md](03-tekton-webhook-configuration.md) 
+继续阅读：[06-tekton-webhook-configuration.md](06-tekton-webhook-configuration.md) 

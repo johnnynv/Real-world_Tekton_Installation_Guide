@@ -14,7 +14,7 @@
 ## 🔧 前提条件
 
 ### 系统要求
-- ✅ 已完成 [Tekton Webhook 配置](03-tekton-webhook-configuration.md)
+- ✅ 已完成 [Tekton Webhook 配置](06-tekton-webhook-configuration.md)
 - ✅ Kubernetes 集群支持 GPU (推荐: 8GB+ GPU 内存)
 - ✅ NVIDIA GPU Operator 已安装
 - ✅ 持久存储支持 (至少 50GB)

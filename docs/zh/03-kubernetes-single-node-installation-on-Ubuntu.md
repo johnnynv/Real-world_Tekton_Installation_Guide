@@ -1,159 +1,159 @@
-# 00 - Kubernetes Single Node Cluster Installation Guide
+# Ubuntu 24.04 单节点 Kubernetes 集群安装指南
 
-## Overview
+## 概述
 
-This document provides a complete guide for installing a single-node Kubernetes cluster on Ubuntu 24.04 LTS system. This installation adopts production-grade configurations, including comprehensive monitoring, storage, networking, and GPU support, suitable for development, testing, and small-scale production environments.
+本文档提供在 Ubuntu 24.04 LTS 系统上安装单节点 Kubernetes 集群的完整指南。该安装方案采用生产级配置，包含完整的监控、存储、网络和 GPU 支持，适合开发、测试和小规模生产环境使用。
 
-## Technology Stack Selection
+## 技术栈选择
 
-After technical evaluation, this installation adopts the following technology stack:
+经过技术评估，本安装采用以下技术栈：
 
-- **Container Runtime**: containerd (CNCF graduated project, officially recommended)
-- **Kubernetes Version**: v1.30.x (stable version, production-ready)
-- **Network Plugin**: Flannel (simple and reliable, suitable for single-node)
-- **Storage**: local-path-provisioner (single-node storage solution)
-- **Ingress Controller**: NGINX Ingress Controller (industry standard)
-- **Monitoring Solution**: Prometheus + Grafana (complete monitoring ecosystem)
-- **Dashboard**: Kubernetes Dashboard (official dashboard)
-- **GPU Support**: NVIDIA GPU Operator (official GPU management solution)
+- **容器运行时**: containerd (CNCF 毕业项目，官方推荐)
+- **Kubernetes 版本**: v1.30.x (稳定版本，生产就绪)
+- **网络插件**: Flannel (简单可靠，适合单节点)
+- **存储**: local-path-provisioner (单节点存储解决方案)
+- **入口控制器**: NGINX Ingress Controller (行业标准)
+- **监控方案**: Prometheus + Grafana (完整监控生态)
+- **仪表板**: Kubernetes Dashboard (官方仪表板)
+- **GPU 支持**: NVIDIA GPU Operator (官方 GPU 管理方案)
 
-## System Requirements
+## 系统要求
 
-### Hardware Requirements
-- **CPU**: Minimum 4 cores (recommended 8 cores or more)
-- **Memory**: Minimum 8GB RAM (recommended 16GB or more)
-- **Storage**: Minimum 50GB available disk space (recommended 100GB)
-- **Network**: Stable network connection
-- **GPU**: NVIDIA GPU (optional, this environment has 4x NVIDIA A16)
+### 硬件要求
+- **CPU**: 最少 4 核心（推荐 8 核心）
+- **内存**: 最少 8GB RAM（推荐 16GB 或以上）
+- **存储**: 最少 50GB 可用磁盘空间（推荐 100GB）
+- **网络**: 稳定的网络连接
+- **GPU**: NVIDIA GPU（可选，本环境有 4x NVIDIA A16）
 
-### Software Requirements
+### 软件要求
 - Ubuntu 24.04 LTS (Noble Numbat)
-- Root or sudo privileges
-- Internet connection
+- Root 或 sudo 权限
+- 互联网连接
 
-## Part 1: System Prerequisites Preparation
+## 第一部分：系统前置条件准备
 
-### 1.1 System Information Verification
+### 1.1 系统信息验证
 
-First verify current system configuration:
+首先验证当前系统配置：
 
 ```bash
-# Check system version
+# 检查系统版本
 lsb_release -a
 
-# Check kernel version
+# 检查内核版本
 uname -r
 
-# Check system resources
+# 检查系统资源
 free -h
 df -h
 
-# Check GPU information (if available)
+# 检查 GPU 信息（如果有）
 nvidia-smi
 ```
 
-**Verification Method**:
-- Confirm output shows Ubuntu 24.04
-- Kernel version should be 6.x series
-- Available memory at least 8GB
-- Root partition at least 50GB available space
-- GPU information displays normally
+**验证方法**：
+- 确认输出显示 Ubuntu 24.04
+- 内核版本应为 6.x 系列
+- 可用内存至少 8GB
+- 根分区至少有 50GB 可用空间
+- GPU 信息正常显示
 
-### 1.2 Update System Packages
+### 1.2 更新系统包
 
 ```bash
-# Update package index
+# 更新包索引
 sudo apt update
 
-# Upgrade all packages to latest version
+# 升级所有包到最新版本
 sudo apt upgrade -y
 
-# Install necessary tool packages
+# 安装必要的工具包
 sudo apt install -y curl wget gnupg2 software-properties-common apt-transport-https ca-certificates lsb-release
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check if key tools are installed successfully
+# 检查关键工具是否安装成功
 which curl wget gnupg2
 curl --version
 ```
 
-### 1.3 Configure System Parameters
+### 1.3 配置系统参数
 
-#### 1.3.1 Disable Swap
+#### 1.3.1 禁用 Swap
 
-Kubernetes requires disabling swap to ensure performance:
+Kubernetes 要求禁用 swap 以确保性能：
 
 ```bash
-# Temporarily disable swap
+# 临时禁用 swap
 sudo swapoff -a
 
-# Permanently disable swap
+# 永久禁用 swap
 sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check if swap is disabled
+# 检查 swap 是否已禁用
 free -h
-# Swap line should show all zeros
+# Swap 行应显示全部为 0
 
-# Check fstab configuration
+# 检查 fstab 配置
 grep swap /etc/fstab
-# swap line should be commented out
+# swap 行应被注释掉
 ```
 
-#### 1.3.2 Load Required Kernel Modules
+#### 1.3.2 加载必要的内核模块
 
 ```bash
-# Create kernel module configuration file
+# 创建内核模块配置文件
 cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
 overlay
 br_netfilter
 EOF
 
-# Load modules immediately
+# 立即加载模块
 sudo modprobe overlay
 sudo modprobe br_netfilter
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check if modules are loaded successfully
+# 检查模块是否加载成功
 lsmod | grep overlay
 lsmod | grep br_netfilter
 ```
 
-#### 1.3.3 Configure System Kernel Parameters
+#### 1.3.3 配置系统内核参数
 
 ```bash
-# Create sysctl configuration file
+# 创建 sysctl 配置文件
 cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
 net.bridge.bridge-nf-call-iptables  = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 net.ipv4.ip_forward                 = 1
 EOF
 
-# Apply configuration
+# 应用配置
 sudo sysctl --system
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check if parameters are set correctly
+# 检查参数是否正确设置
 sysctl net.bridge.bridge-nf-call-iptables
 sysctl net.bridge.bridge-nf-call-ip6tables  
 sysctl net.ipv4.ip_forward
-# All values should be 1
+# 所有值都应该为 1
 ```
 
-### 1.4 Configure Firewall
+### 1.4 配置防火墙
 
-Open necessary ports for Kubernetes components:
+为 Kubernetes 组件开放必要的端口：
 
 ```bash
-# If using ufw (Ubuntu default firewall)
+# 如果使用 ufw（Ubuntu 默认防火墙）
 sudo ufw allow 6443/tcp    # Kubernetes API server
 sudo ufw allow 2379:2380/tcp # etcd server client API
 sudo ufw allow 10250/tcp   # Kubelet API
@@ -162,174 +162,174 @@ sudo ufw allow 10252/tcp   # kube-controller-manager
 sudo ufw allow 10255/tcp   # Read-only Kubelet API
 sudo ufw allow 30000:32767/tcp # NodePort Services
 
-# Allow container network communication
-sudo ufw allow from 10.244.0.0/16  # Pod network (Flannel)
-sudo ufw allow from 10.96.0.0/12   # Service network
+# 允许容器网络通信
+sudo ufw allow from 10.244.0.0/16  # Pod 网络（Flannel）
+sudo ufw allow from 10.96.0.0/12   # Service 网络
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check firewall rules
+# 检查防火墙规则
 sudo ufw status numbered
 ```
 
-## Part 2: Container Runtime Installation and Configuration
+## 第二部分：容器运行时安装配置
 
-### 2.1 Install containerd
+### 2.1 安装 containerd
 
-#### 2.1.1 Add Docker Official Repository
+#### 2.1.1 添加 Docker 官方仓库
 
 ```bash
-# Create keyrings directory
+# 创建 keyrings 目录
 sudo mkdir -p /etc/apt/keyrings
 
-# Add Docker's official GPG key
+# 添加 Docker 的官方 GPG 密钥
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-# Set up repository
+# 设置仓库
 echo \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
   $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 ```
 
-#### 2.1.2 Install containerd
+#### 2.1.2 安装 containerd
 
 ```bash
-# Update package index
+# 更新包索引
 sudo apt update
 
-# Install containerd
+# 安装 containerd
 sudo apt install -y containerd.io
 
-# Start and enable containerd service
+# 启动并启用 containerd 服务
 sudo systemctl enable containerd
 sudo systemctl start containerd
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check containerd version and status
+# 检查 containerd 版本和状态
 containerd --version
 sudo systemctl status containerd
 ```
 
-### 2.2 Configure containerd
+### 2.2 配置 containerd
 
-#### 2.2.1 Generate Default Configuration
+#### 2.2.1 生成默认配置
 
 ```bash
-# Create configuration directory
+# 创建配置目录
 sudo mkdir -p /etc/containerd
 
-# Generate default configuration
+# 生成默认配置
 containerd config default | sudo tee /etc/containerd/config.toml
 
-# Backup configuration file
+# 备份配置文件
 sudo cp /etc/containerd/config.toml /etc/containerd/config.toml.backup
 ```
 
-#### 2.2.2 Configure systemd cgroup Driver
+#### 2.2.2 配置 systemd cgroup 驱动
 
 ```bash
-# Modify systemd cgroup configuration
+# 修改 systemd cgroup 配置
 sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check if configuration is correctly modified
+# 检查配置是否正确修改
 grep -A 5 -B 5 "SystemdCgroup" /etc/containerd/config.toml
 ```
 
-#### 2.2.3 Restart containerd
+#### 2.2.3 重启 containerd
 
 ```bash
-# Restart service to apply new configuration
+# 重启服务以应用新配置
 sudo systemctl restart containerd
 
-# Check service status
+# 检查服务状态
 sudo systemctl status containerd
 ```
 
-**Important Note**: If encountering CRI errors during kubeadm init, restart containerd service:
+**重要提示**: 如果 kubeadm init 时遇到 CRI 错误，需要重启 containerd 服务：
 ```bash
-# If encountering "container runtime is not running" error
+# 如果遇到 "container runtime is not running" 错误
 sudo systemctl restart containerd
 
-# Verify CRI interface is working
+# 验证 CRI 接口是否正常
 sudo crictl --runtime-endpoint unix:///var/run/containerd/containerd.sock version
 ```
 
-### 2.3 Install CNI Plugins
+### 2.3 安装 CNI 插件
 
 ```bash
-# Create CNI directory
+# 创建 CNI 目录
 sudo mkdir -p /opt/cni/bin
 
-# Download CNI plugins
+# 下载 CNI 插件
 CNI_VERSION="v1.3.0"
 curl -L "https://github.com/containernetworking/plugins/releases/download/${CNI_VERSION}/cni-plugins-linux-amd64-${CNI_VERSION}.tgz" | sudo tar -C /opt/cni/bin -xz
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check if CNI plugins are installed successfully
+# 检查 CNI 插件是否安装成功
 ls -la /opt/cni/bin/
 ```
 
-## Part 3: Kubernetes Tools Installation
+## 第三部分：Kubernetes 工具安装
 
-### 3.1 Install kubeadm, kubelet, kubectl
+### 3.1 安装 kubeadm, kubelet, kubectl
 
-#### 3.1.1 Add Kubernetes Repository
+#### 3.1.1 添加 Kubernetes 仓库
 
 ```bash
-# Add Kubernetes signing key
+# 添加 Kubernetes 签名密钥
 curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
 
-# Add Kubernetes repository
+# 添加 Kubernetes 仓库
 echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /' | sudo tee /etc/apt/sources.list.d/kubernetes.list
 ```
 
-#### 3.1.2 Install Kubernetes Tools
+#### 3.1.2 安装 Kubernetes 工具
 
 ```bash
-# Update package index
+# 更新包索引
 sudo apt update
 
-# Install Kubernetes tools
+# 安装 Kubernetes 工具
 sudo apt install -y kubelet kubeadm kubectl
 
-# Prevent automatic updates
+# 防止自动更新
 sudo apt-mark hold kubelet kubeadm kubectl
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check versions
+# 检查版本
 kubeadm version
 kubelet --version
 kubectl version --client
 ```
 
-### 3.2 Configure kubelet
+### 3.2 配置 kubelet
 
 ```bash
-# Enable kubelet service
+# 启用 kubelet 服务
 sudo systemctl enable kubelet
 ```
 
-## Part 4: Initialize Kubernetes Cluster
+## 第四部分：初始化 Kubernetes 集群
 
-### 4.1 Create Cluster Configuration File
+### 4.1 创建集群配置文件
 
-Create kubeadm configuration file to customize cluster parameters:
+创建 kubeadm 配置文件以自定义集群参数：
 
 ```bash
 cat <<EOF | sudo tee /tmp/kubeadm-config.yaml
 apiVersion: kubeadm.k8s.io/v1beta3
 kind: ClusterConfiguration
-kubernetesVersion: v1.30.14
+kubernetesVersion: v1.30.0
 controlPlaneEndpoint: "$(hostname -I | awk '{print $1}'):6443"
 networking:
   serviceSubnet: "10.96.0.0/12"
@@ -354,115 +354,115 @@ containerRuntimeEndpoint: "unix:///var/run/containerd/containerd.sock"
 EOF
 ```
 
-### 4.2 Initialize Cluster
+### 4.2 初始化集群
 
 ```bash
-# Initialize Kubernetes cluster
+# 初始化 Kubernetes 集群
 sudo kubeadm init --config=/tmp/kubeadm-config.yaml
 
-# Save the join command from output (although it's single-node, recommend saving for future node addition)
+# 记录输出的 join 命令（虽然是单节点，但建议保存）
 ```
 
-**Important**: Save the kubeadm join command from the output for future node additions.
+**重要**: 保存输出中的 kubeadm join 命令，以备将来添加节点使用。
 
-### 4.3 Configure kubectl
+### 4.3 配置 kubectl
 
 ```bash
-# Configure kubectl for current user
+# 为当前用户配置 kubectl
 mkdir -p $HOME/.kube
 sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
 sudo chown $(id -u):$(id -g) $HOME/.kube/config
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check cluster status
+# 检查集群状态
 kubectl cluster-info
 kubectl get nodes
 ```
 
-### 4.4 Remove Master Node Taint (Single-node Configuration)
+### 4.4 移除 master 节点污点（单节点配置）
 
 ```bash
-# Allow scheduling Pods on master node
+# 允许在 master 节点上调度 Pod
 kubectl taint nodes --all node-role.kubernetes.io/control-plane-
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check node status
+# 检查节点状态
 kubectl get nodes
-# Status should be Ready, but may show NotReady before network plugin installation
+# 状态应该为 Ready，但网络插件安装前可能显示 NotReady
 ```
 
-## Part 5: Network Plugin Installation (Flannel)
+## 第五部分：网络插件安装（Flannel）
 
-### 5.1 Install Flannel
+### 5.1 安装 Flannel
 
 ```bash
-# Download and install Flannel
+# 下载并安装 Flannel
 kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check Flannel Pod status
+# 检查 Flannel Pod 状态
 kubectl get pods -n kube-flannel
 
-# Check node status (should become Ready)
+# 检查节点状态（应该变为 Ready）
 kubectl get nodes
 
-# Check all system Pod status
+# 检查所有系统 Pod 状态
 kubectl get pods -A
 ```
 
-### 5.2 Verify Network Connectivity
+### 5.2 验证网络连通性
 
 ```bash
-# Create test Pod
+# 创建测试 Pod
 kubectl run test-pod --image=busybox --restart=Never --rm -it -- /bin/sh
 
-# Test inside Pod (execute in Pod shell)
+# 在 Pod 内测试（在 Pod shell 中执行）
 nslookup kubernetes.default.svc.cluster.local
 ping -c 3 8.8.8.8
 exit
 ```
 
-## Part 6: Storage Configuration (local-path-provisioner)
+## 第六部分：存储配置（local-path-provisioner）
 
-### 6.1 Install local-path-provisioner
+### 6.1 安装 local-path-provisioner
 
 ```bash
-# Install local-path-provisioner
+# 安装 local-path-provisioner
 kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/v0.0.24/deploy/local-path-storage.yaml
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check storage class
+# 检查存储类
 kubectl get storageclass
 
-# Check local-path-provisioner Pod
+# 检查 local-path-provisioner Pod
 kubectl get pods -n local-path-storage
 ```
 
-### 6.2 Set Default Storage Class
+### 6.2 设置默认存储类
 
 ```bash
-# Set local-path as default storage class
+# 设置 local-path 为默认存储类
 kubectl patch storageclass local-path -p '{"metadata": {"annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}'
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check default storage class (should see local-path (default))
+# 检查默认存储类（应该看到 local-path (default)）
 kubectl get storageclass
 ```
 
-### 6.3 Test Storage Functionality
+### 6.3 测试存储功能
 
 ```bash
-# Create test PVC
+# 创建测试 PVC
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -476,7 +476,7 @@ spec:
       storage: 1Gi
 EOF
 
-# Create test Pod using PVC
+# 创建使用 PVC 的测试 Pod
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Pod
@@ -497,73 +497,73 @@ spec:
 EOF
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check PVC status
+# 检查 PVC 状态
 kubectl get pvc
 
-# Check Pod status
+# 检查 Pod 状态
 kubectl get pods
 
-# Verify data write
+# 验证数据写入
 kubectl exec test-storage-pod -- cat /data/test.txt
 
-# Clean up test resources
+# 清理测试资源
 kubectl delete pod test-storage-pod
 kubectl delete pvc test-pvc
 ```
 
-## Part 7: NGINX Ingress Controller Installation
+## 第七部分：NGINX Ingress Controller 安装
 
-### 7.1 Install NGINX Ingress Controller
+### 7.1 安装 NGINX Ingress Controller
 
 ```bash
-# Install NGINX Ingress Controller
+# 安装 NGINX Ingress Controller
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.2/deploy/static/provider/baremetal/deploy.yaml
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check Ingress Controller Pod status
+# 检查 Ingress Controller Pod 状态
 kubectl get pods -n ingress-nginx
 
-# Check service status
+# 检查服务状态
 kubectl get svc -n ingress-nginx
 ```
 
-### 7.2 Configure Ingress Controller as NodePort
+### 7.2 配置 Ingress Controller 为 NodePort
 
 ```bash
-# Check NodePort ports
+# 检查 NodePort 端口
 kubectl get svc -n ingress-nginx ingress-nginx-controller
 
-# Record HTTP and HTTPS ports (usually in 30000+ range)
+# 记录 HTTP 和 HTTPS 端口（通常是 30000+ 范围）
 ```
 
-### 7.3 Generate Self-signed Certificate
+### 7.3 生成自签名证书
 
 ```bash
-# Create certificate directory
+# 创建证书目录
 mkdir -p ~/k8s-certs
 cd ~/k8s-certs
 
-# Generate private key
+# 生成私钥
 openssl genrsa -out tls.key 2048
 
-# Generate certificate signing request
+# 生成证书签名请求
 openssl req -new -key tls.key -out tls.csr -subj "/CN=k8s.local/O=kubernetes"
 
-# Generate self-signed certificate
+# 生成自签名证书
 openssl x509 -req -in tls.csr -signkey tls.key -out tls.crt -days 365
 
-# Create TLS Secret
+# 创建 TLS Secret
 kubectl create secret tls k8s-local-tls --cert=tls.crt --key=tls.key -n default
 ```
 
-### 7.4 Test Ingress
+### 7.4 测试 Ingress
 
 ```bash
-# Create test application
+# 创建测试应用
 cat <<EOF | kubectl apply -f -
 apiVersion: apps/v1
 kind: Deployment
@@ -621,53 +621,53 @@ spec:
 EOF
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check Ingress status
+# 检查 Ingress 状态
 kubectl get ingress
 
-# Add local hosts entry
+# 添加本地 hosts 条目
 echo "127.0.0.1 k8s.local" | sudo tee -a /etc/hosts
 
-# Get NodePort port
+# 获取 NodePort 端口
 HTTPS_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
 
-# Test access (ignore certificate warning)
+# 测试访问（忽略证书警告）
 curl -k https://k8s.local:$HTTPS_PORT
 
-# Clean up test resources
+# 清理测试资源
 kubectl delete deployment test-app
 kubectl delete service test-app-service
 kubectl delete ingress test-app-ingress
 ```
 
-## Part 8: Monitoring System Installation (Prometheus + Grafana)
+## 第八部分：监控系统安装（Prometheus + Grafana）
 
-### 8.1 Install kube-prometheus-stack
+### 8.1 安装 kube-prometheus-stack
 
 ```bash
-# Add Prometheus Helm repository
+# 添加 Prometheus Helm 仓库
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
-# Add Prometheus community Helm repository
+# 添加 Prometheus 社区 Helm 仓库
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 ```
 
-### 8.2 Create Monitoring Namespace
+### 8.2 创建监控命名空间
 
 ```bash
-# Create monitoring namespace
+# 创建监控命名空间
 kubectl create namespace monitoring
 ```
 
-### 8.3 Install Prometheus and Grafana
+### 8.3 安装 Prometheus 和 Grafana
 
 ```bash
-# Create configuration directory
+# 创建配置文件目录
 mkdir -p configs/monitoring
 
-# Create values configuration file
+# 创建 values 配置文件
 cat <<EOF > configs/monitoring/prometheus-values.yaml
 prometheus:
   prometheusSpec:
@@ -702,58 +702,58 @@ alertmanager:
               storage: 5Gi
 EOF
 
-# Install kube-prometheus-stack (set Grafana password to admin123)
+# 安装 kube-prometheus-stack (设置 Grafana 密码为 admin123)
 helm install prometheus prometheus-community/kube-prometheus-stack \
   --namespace monitoring \
   --values configs/monitoring/prometheus-values.yaml \
   --set grafana.adminPassword=admin123
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check all monitoring component status
+# 检查所有监控组件状态
 kubectl get pods -n monitoring
 
-# Check services
+# 检查服务
 kubectl get svc -n monitoring
 
-# Get Grafana access port
+# 获取 Grafana 访问端口
 kubectl get svc -n monitoring prometheus-grafana -o jsonpath='{.spec.ports[0].nodePort}'
 ```
 
-### 8.4 Configure Grafana Access
+### 8.4 配置 Grafana 访问
 
 ```bash
-# Get Grafana NodePort
+# 获取 Grafana NodePort
 GRAFANA_PORT=$(kubectl get svc -n monitoring prometheus-grafana -o jsonpath='{.spec.ports[0].nodePort}')
 
-echo "Grafana access URL: http://$(hostname -I | awk '{print $1}'):$GRAFANA_PORT"
-echo "Username: admin"
-echo "Password: admin123"
+echo "Grafana 访问地址: http://$(hostname -I | awk '{print $1}'):$GRAFANA_PORT"
+echo "用户名: admin"
+echo "密码: admin123"
 ```
 
-### 8.5 Verify Monitoring Data
+### 8.5 验证监控数据
 
 ```bash
-# Get Prometheus access port
+# 获取 Prometheus 访问端口
 PROMETHEUS_PORT=$(kubectl get svc -n monitoring prometheus-kube-prometheus-prometheus -o jsonpath='{.spec.ports[0].nodePort}')
 
-echo "Prometheus access URL: http://$(hostname -I | awk '{print $1}'):$PROMETHEUS_PORT"
+echo "Prometheus 访问地址: http://$(hostname -I | awk '{print $1}'):$PROMETHEUS_PORT"
 ```
 
-## Part 9: Kubernetes Dashboard Installation
+## 第九部分：Kubernetes Dashboard 安装
 
-### 9.1 Install Kubernetes Dashboard
+### 9.1 安装 Kubernetes Dashboard
 
 ```bash
-# Install Kubernetes Dashboard
+# 安装 Kubernetes Dashboard
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
 ```
 
-### 9.2 Create Admin User
+### 9.2 创建管理员用户
 
 ```bash
-# Create service account
+# 创建服务账户
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: ServiceAccount
@@ -776,108 +776,96 @@ subjects:
 EOF
 ```
 
-### 9.3 Configure Dashboard Access
+### 9.3 配置 Dashboard 访问
 
 ```bash
-# Modify service type to NodePort
+# 修改服务类型为 NodePort
 kubectl patch svc kubernetes-dashboard -n kubernetes-dashboard -p '{"spec":{"type":"NodePort"}}'
 
-# Get access port
+# 获取访问端口
 DASHBOARD_PORT=$(kubectl get svc -n kubernetes-dashboard kubernetes-dashboard -o jsonpath='{.spec.ports[0].nodePort}')
 
-echo "Dashboard access URL: https://$(hostname -I | awk '{print $1}'):$DASHBOARD_PORT"
+echo "Dashboard 访问地址: https://$(hostname -I | awk '{print $1}'):$DASHBOARD_PORT"
 ```
 
-### 9.4 Get Access Token
+### 9.4 获取访问令牌
 
 ```bash
-# Get access token
-kubectl -n kubernetes-dashboard create token admin-user
+# 创建长期有效的访问令牌 (1年有效期)
+kubectl create token dashboard-admin -n kubernetes-dashboard --duration=8760h
 
-# Or create long-term token
-cat <<EOF | kubectl apply -f -
-apiVersion: v1
-kind: Secret
-metadata:
-  name: admin-user-token
-  namespace: kubernetes-dashboard
-  annotations:
-    kubernetes.io/service-account.name: "admin-user"
-type: kubernetes.io/service-account-token
-EOF
-
-# Get long-term token
-kubectl get secret admin-user-token -n kubernetes-dashboard -o jsonpath='{.data.token}' | base64 -d
+# 保存令牌到文件 (可选)
+kubectl create token dashboard-admin -n kubernetes-dashboard --duration=8760h > dashboard-token.txt
 ```
 
-**Verification Method**:
-- Access Dashboard URL using browser
-- Select "Token" login method
-- Input the obtained token
-- Successfully login and see cluster overview
+**验证方法**：
+- 使用浏览器访问 Dashboard URL
+- 选择 "Token" 登录方式
+- 输入获取的令牌
+- 成功登录并看到集群概览
 
-## Part 10: GPU Support Configuration (NVIDIA GPU Operator)
+## 第十部分：GPU 支持配置（NVIDIA GPU Operator）
 
-### 10.1 Verify GPU Driver
+### 10.1 验证 GPU 驱动
 
 ```bash
-# Check NVIDIA driver status
+# 检查 NVIDIA 驱动状态
 nvidia-smi
 
-# Check NVIDIA container toolkit (install if needed)
-which nvidia-container-runtime || echo "Need to install nvidia-container-toolkit"
+# 检查 NVIDIA 容器工具包（如果需要安装）
+which nvidia-container-runtime || echo "需要安装 nvidia-container-toolkit"
 ```
 
-### 10.2 Install NVIDIA Container Toolkit
+### 10.2 安装 NVIDIA Container Toolkit
 
 ```bash
-# Add NVIDIA repository GPG key
+# 添加 NVIDIA 仓库 GPG 密钥
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 
-# Add NVIDIA repository
+# 添加 NVIDIA 仓库
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
 sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
 sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 
-# Install nvidia-container-toolkit
+# 安装 nvidia-container-toolkit
 sudo apt update
 sudo apt install -y nvidia-container-toolkit
 
-# Configure containerd
+# 配置 containerd
 sudo nvidia-ctk runtime configure --runtime=containerd
 sudo systemctl restart containerd
 ```
 
-### 10.3 Install NVIDIA GPU Operator
+### 10.3 安装 NVIDIA GPU Operator
 
 ```bash
-# Add NVIDIA Helm repository
+# 添加 NVIDIA Helm 仓库
 helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
 helm repo update
 
-# Create GPU Operator namespace
+# 创建 GPU Operator 命名空间
 kubectl create namespace gpu-operator
 
-# Install GPU Operator
+# 安装 GPU Operator
 helm install gpu-operator nvidia/gpu-operator \
   --namespace gpu-operator \
   --set driver.enabled=false \
   --set toolkit.enabled=true
 ```
 
-**Verification Method**:
+**验证方法**：
 ```bash
-# Check GPU Operator component status
+# 检查 GPU Operator 组件状态
 kubectl get pods -n gpu-operator
 
-# Wait for all Pods to be ready (may take several minutes)
+# 等待所有 Pod 就绪（可能需要几分钟）
 kubectl wait --for=condition=Ready pod --all -n gpu-operator --timeout=600s
 ```
 
-### 10.4 Verify GPU Functionality
+### 10.4 验证 GPU 功能
 
 ```bash
-# Create GPU test Pod
+# 创建 GPU 测试 Pod
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Pod
@@ -894,52 +882,52 @@ spec:
   restartPolicy: Never
 EOF
 
-# Wait for Pod completion
+# 等待 Pod 完成
 kubectl wait --for=condition=Ready pod/gpu-test --timeout=300s
 
-# View GPU test results
+# 查看 GPU 测试结果
 kubectl logs gpu-test
 
-# Clean up test Pod
+# 清理测试 Pod
 kubectl delete pod gpu-test
 ```
 
-### 10.5 Deploy GPU Monitoring
+### 10.5 部署 GPU 监控
 
 ```bash
-# GPU Operator automatically deploys DCGM Exporter for GPU monitoring
-# Check DCGM Exporter status
+# GPU Operator 会自动部署 DCGM Exporter 用于 GPU 监控
+# 检查 DCGM Exporter 状态
 kubectl get pods -n gpu-operator | grep dcgm
 
-# Check GPU metrics
+# 检查 GPU 指标
 kubectl get --raw /api/v1/nodes/$(kubectl get nodes -o name | cut -d/ -f2)/proxy/metrics | grep DCGM
 ```
 
-## Part 11: System Verification and Testing
+## 第十一部分：系统验证和测试
 
-### 11.1 Comprehensive Cluster Status Check
+### 11.1 全面集群状态检查
 
 ```bash
-# Check all node status
+# 检查所有节点状态
 kubectl get nodes -o wide
 
-# Check all namespace Pod status
+# 检查所有命名空间的 Pod 状态
 kubectl get pods -A
 
-# Check all service status
+# 检查所有服务状态
 kubectl get svc -A
 
-# Check storage classes
+# 检查存储类
 kubectl get storageclass
 
-# Check Ingress status
+# 检查 Ingress 状态
 kubectl get ingress -A
 ```
 
-### 11.2 Network Connectivity Test
+### 11.2 网络连通性测试
 
 ```bash
-# Create network test Pod
+# 创建网络测试 Pod
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: Pod
@@ -952,23 +940,23 @@ spec:
     command: ['sleep', '3600']
 EOF
 
-# Wait for Pod ready
+# 等待 Pod 就绪
 kubectl wait --for=condition=Ready pod/network-test --timeout=300s
 
-# Test internal DNS resolution
+# 测试内部 DNS 解析
 kubectl exec network-test -- nslookup kubernetes.default.svc.cluster.local
 
-# Test external network
-kubectl exec network-test -- wget -q --spider http://www.google.com && echo "External network OK"
+# 测试外部网络
+kubectl exec network-test -- wget -q --spider http://www.google.com && echo "外网连通正常"
 
-# Clean up test Pod
+# 清理测试 Pod
 kubectl delete pod network-test
 ```
 
-### 11.3 Storage Functionality Test
+### 11.3 存储功能测试
 
 ```bash
-# Create storage test
+# 创建存储测试
 cat <<EOF | kubectl apply -f -
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -989,7 +977,7 @@ spec:
   containers:
   - name: storage-test
     image: busybox
-    command: ['sh', '-c', 'echo "Storage test data" > /data/test.txt && cat /data/test.txt && sleep 300']
+    command: ['sh', '-c', 'echo "存储测试数据" > /data/test.txt && cat /data/test.txt && sleep 300']
     volumeMounts:
     - name: storage-volume
       mountPath: /data
@@ -999,18 +987,18 @@ spec:
       claimName: storage-test-pvc
 EOF
 
-# Check test results
+# 检查测试结果
 kubectl logs storage-test
 
-# Clean up test resources
+# 清理测试资源
 kubectl delete pod storage-test
 kubectl delete pvc storage-test-pvc
 ```
 
-### 11.4 GPU Load Test
+### 11.4 GPU 负载测试
 
 ```bash
-# Create GPU load test
+# 创建 GPU 负载测试
 cat <<EOF | kubectl apply -f -
 apiVersion: batch/v1
 kind: Job
@@ -1026,9 +1014,9 @@ spec:
         args:
         - |
           nvidia-smi
-          echo "Running GPU benchmark test..."
-          # Simple GPU computation test
-          echo 'import numpy as np; print("GPU test completed")' > test.py
+          echo "运行 GPU 基准测试..."
+          # 简单的 GPU 计算测试
+          echo 'import numpy as np; print("GPU 测试完成")' > test.py
           python3 test.py || echo "Python3 not available, test completed with nvidia-smi"
         resources:
           limits:
@@ -1036,35 +1024,35 @@ spec:
       restartPolicy: Never
 EOF
 
-# Wait for job completion
+# 等待任务完成
 kubectl wait --for=condition=Complete job/gpu-benchmark --timeout=600s
 
-# View test results
+# 查看测试结果
 kubectl logs job/gpu-benchmark
 
-# Clean up test job
+# 清理测试任务
 kubectl delete job gpu-benchmark
 ```
 
-### 11.5 Monitoring System Verification
+### 11.5 监控系统验证
 
 ```bash
-# Check Prometheus targets status
+# 检查 Prometheus 目标状态
 PROMETHEUS_PORT=$(kubectl get svc -n monitoring prometheus-kube-prometheus-prometheus -o jsonpath='{.spec.ports[0].nodePort}')
-echo "Access Prometheus targets: http://$(hostname -I | awk '{print $1}'):$PROMETHEUS_PORT/targets"
+echo "访问 Prometheus targets: http://$(hostname -I | awk '{print $1}'):$PROMETHEUS_PORT/targets"
 
-# Check Grafana dashboards
+# 检查 Grafana 仪表板
 GRAFANA_PORT=$(kubectl get svc -n monitoring prometheus-grafana -o jsonpath='{.spec.ports[0].nodePort}')
-echo "Access Grafana: http://$(hostname -I | awk '{print $1}'):$GRAFANA_PORT"
-echo "Username: admin, Password: admin123"
+echo "访问 Grafana: http://$(hostname -I | awk '{print $1}'):$GRAFANA_PORT"
+echo "用户名: admin, 密码: admin123"
 ```
 
-## Part 12: Performance Optimization and Security Configuration
+## 第十二部分：性能优化和安全配置
 
-### 12.1 System Performance Optimization
+### 12.1 系统性能优化
 
 ```bash
-# Configure system limits
+# 配置系统限制
 cat <<EOF | sudo tee /etc/security/limits.d/k8s.conf
 * soft nofile 65536
 * hard nofile 65536
@@ -1072,9 +1060,9 @@ cat <<EOF | sudo tee /etc/security/limits.d/k8s.conf
 * hard nproc 65536
 EOF
 
-# Configure kernel parameter optimization
+# 配置内核参数优化
 cat <<EOF | sudo tee /etc/sysctl.d/k8s-performance.conf
-# Network optimization
+# 网络优化
 net.core.somaxconn = 32768
 net.core.netdev_max_backlog = 5000
 net.ipv4.tcp_max_syn_backlog = 8192
@@ -1082,22 +1070,22 @@ net.ipv4.tcp_max_tw_buckets = 2000000
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 30
 
-# Memory optimization
+# 内存优化
 vm.max_map_count = 262144
 vm.swappiness = 1
 EOF
 
-# Apply configuration
+# 应用配置
 sudo sysctl --system
 ```
 
-### 12.2 Security Configuration
+### 12.2 安全配置
 
 ```bash
-# Configure RBAC minimum privilege principle
-# (In actual production, recommend creating dedicated ServiceAccounts for different applications)
+# 配置 RBAC 最小权限原则
+# （在实际生产中，建议为不同应用创建专用的 ServiceAccount）
 
-# Configure network policies (example)
+# 配置网络策略（示例）
 cat <<EOF | kubectl apply -f -
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -1111,10 +1099,10 @@ spec:
 EOF
 ```
 
-### 12.3 Log Configuration
+### 12.3 日志配置
 
 ```bash
-# Configure containerd log rotation
+# 配置 containerd 日志轮转
 sudo tee /etc/logrotate.d/containerd > /dev/null <<EOF
 /var/log/containerd.log {
     daily
@@ -1130,27 +1118,27 @@ sudo tee /etc/logrotate.d/containerd > /dev/null <<EOF
 EOF
 ```
 
-## Troubleshooting
+## 故障排除
 
-### Common Issues and Solutions
+### 常见问题和解决方案
 
-#### Issue 1: NodePort Services Cannot Be Accessed
-**Symptoms**: Browser shows "connection reset" or "cannot reach" when accessing NodePort services
-**Diagnosis**:
+#### 问题 1: NodePort 服务无法访问
+**症状**: 浏览器访问 NodePort 服务时显示 "连接被重置" 或 "无法访问"
+**诊断**:
 ```bash
-# Check NodePort listening status
+# 检查 NodePort 监听状态
 sudo ss -tlnp | grep -E ":30816|:32000"
 
-# Check kube-proxy status
+# 检查 kube-proxy 状态
 kubectl get pods -n kube-system | grep kube-proxy
 kubectl logs -n kube-system $(kubectl get pods -n kube-system | grep kube-proxy | awk '{print $1}')
 ```
-**Solutions**:
+**解决方案**:
 ```bash
-# Solution 1 (Recommended): Use Ingress to access services
+# 方案 1 (推荐): 使用 Ingress 访问服务
 NODE_IP=$(hostname -I | awk '{print $1}')
 
-# Create Ingress for Grafana (Fixed version - remove problematic rewrite-target)
+# 为 Grafana 创建 Ingress (修复版本 - 移除有问题的 rewrite-target)
 cat <<EOF | kubectl apply -f -
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -1174,7 +1162,7 @@ spec:
               number: 80
 EOF
 
-# If Grafana still shows "Page not found", update Grafana configuration
+# 如果 Grafana 仍显示 "Page not found"，需要更新 Grafana 配置
 cat > /tmp/grafana-values.yaml << 'GRAFANA_EOF'
 grafana:
   grafana.ini:
@@ -1186,16 +1174,16 @@ grafana:
     enabled: false
 GRAFANA_EOF
 
-# Upgrade Grafana configuration via Helm
+# 通过 Helm 升级 Grafana 配置
 helm upgrade prometheus prometheus-community/kube-prometheus-stack -n monitoring -f /tmp/grafana-values.yaml
 
-# Configure NGINX Ingress Controller to use standard ports (no port numbers needed)
+# 配置 NGINX Ingress Controller 使用标准端口 (无需端口号访问)
 kubectl patch deployment ingress-nginx-controller -n ingress-nginx -p '{"spec":{"template":{"spec":{"hostNetwork":true,"dnsPolicy":"ClusterFirstWithHostNet"}}}}'
 
-# Wait for restart to complete
+# 等待重启完成
 kubectl rollout status deployment/ingress-nginx-controller -n ingress-nginx --timeout=120s
 
-# Create Ingress for Dashboard
+# 为 Dashboard 创建 Ingress
 cat <<EOF | kubectl apply -f -
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -1224,57 +1212,57 @@ spec:
               number: 443
 EOF
 
-# Final access URLs (no port numbers, using standard 80/443 ports):
-echo "✅ No-port access URLs:"
+# 最终访问地址 (无端口号，使用标准 80/443 端口):
+echo "✅ 无端口号访问地址:"
 echo "• Grafana: http://grafana.$NODE_IP.nip.io"
 echo "• Dashboard: https://dashboard.$NODE_IP.nip.io"
 
-# Get login credentials:
+# 获取登录凭据:
 echo ""
-echo "🔑 Login Information:"
-echo "• Grafana Username: admin"
-echo "• Grafana Password: admin123"
+echo "🔑 登录信息:"
+echo "• Grafana 用户名: admin"
+echo "• Grafana 密码: admin123"
 echo ""
-echo "• Dashboard Token:"
+echo "• Dashboard 令牌:"
 kubectl create token dashboard-admin -n kubernetes-dashboard --duration=8760h
 echo ""
 
-# Solution 1 Alternative: If NodePort has issues, use kubectl proxy (Most reliable)
+# 方案 1 备选: 如果 NodePort 有问题，使用 kubectl proxy (最可靠)
 cat > ~/kubectl-proxy-services.sh << 'EOF'
 #!/bin/bash
-echo "=== Starting kubectl proxy service ==="
+echo "=== 启动 kubectl proxy 服务 ==="
 pkill -f "kubectl proxy" 2>/dev/null
 sleep 3
 kubectl proxy --address='0.0.0.0' --port=8080 --accept-hosts='.*' > /dev/null 2>&1 &
 sleep 5
 NODE_IP=$(hostname -I | awk '{print $1}')
-echo "✅ kubectl proxy started"
+echo "✅ kubectl proxy 已启动"
 echo "• Grafana: http://$NODE_IP:8080/api/v1/namespaces/monitoring/services/prometheus-grafana:80/proxy/"
 echo "• Dashboard: http://$NODE_IP:8080/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/"
 EOF
 chmod +x ~/kubectl-proxy-services.sh && ~/kubectl-proxy-services.sh
 
-# Solution 2: Restart kube-proxy
+# 方案 2: 重启 kube-proxy
 kubectl delete pod -n kube-system $(kubectl get pods -n kube-system | grep kube-proxy | awk '{print $1}')
 
-# Solution 3: Use port forwarding as temporary solution
+# 方案 3: 使用端口转发作为临时解决方案
 kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80 --address=0.0.0.0 &
 kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443 --address=0.0.0.0 &
 
-# Then access:
-# Grafana: http://NodeIP:3000
-# Dashboard: https://NodeIP:8443
+# 然后访问:
+# Grafana: http://节点IP:3000
+# Dashboard: https://节点IP:8443
 
-# Solution 4: Use automated script to manage port forwarding
+# 方案 4: 使用自动化脚本管理端口转发
 cat > ~/port-forward-services.sh << 'EOF'
 #!/bin/bash
-echo "=== Starting Kubernetes Services Port Forwarding ==="
+echo "=== 启动 Kubernetes 服务端口转发 ==="
 pkill -f "kubectl port-forward" 2>/dev/null
 sleep 3
 kubectl port-forward -n monitoring svc/prometheus-grafana 3000:80 --address=0.0.0.0 > /dev/null 2>&1 &
 kubectl port-forward -n kubernetes-dashboard svc/kubernetes-dashboard 8443:443 --address=0.0.0.0 > /dev/null 2>&1 &
 sleep 5
-echo "✅ Port forwarding started"
+echo "✅ 端口转发已启动"
 echo "• Grafana: http://$(hostname -I | awk '{print $1}'):3000"
 echo "• Dashboard: https://$(hostname -I | awk '{print $1}'):8443"
 EOF
@@ -1283,13 +1271,13 @@ chmod +x ~/port-forward-services.sh
 ~/port-forward-services.sh
 ```
 
-**Important Note**: Direct access to Kubernetes API Server (port 6443) returns 403 error, which is normal security behavior. Use kubectl or tools with proper authentication to access.
+**重要说明**: 直接访问 Kubernetes API Server (6443端口) 会返回 403 错误，这是正常的安全行为。需要使用 kubectl 或带有正确认证的工具访问。
 
-#### Issue 2: NVIDIA Container Toolkit Repository Configuration Problems
-**Symptoms**: 404 errors when adding NVIDIA repository
-**Solutions**:
+#### 问题 2: NVIDIA Container Toolkit 仓库配置问题
+**症状**: 添加 NVIDIA 仓库时返回 404 错误
+**解决方案**:
 ```bash
-# Use new repository configuration method
+# 使用新的仓库配置方法
 curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
 
 curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
@@ -1297,93 +1285,93 @@ sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-
 sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
 ```
 
-#### Issue 3: Pod Stuck in Pending State
-**Symptoms**: Pod remains in Pending state for long time
-**Diagnosis**:
+#### 问题 3: Pod 卡在 Pending 状态
+**症状**: Pod 长时间处于 Pending 状态
+**诊断**:
 ```bash
 kubectl describe pod <pod-name>
 kubectl get events --sort-by=.metadata.creationTimestamp
 ```
-**Solutions**:
-- Check resource limits
-- Check node taints
-- Check storage class configuration
+**解决方案**:
+- 检查资源限制
+- 检查节点污点
+- 检查存储类配置
 
-#### Issue 2: Network Connection Problems
-**Symptoms**: Pods cannot communicate with each other
-**Diagnosis**:
+#### 问题 2: 网络连接问题
+**症状**: Pod 之间无法通信
+**诊断**:
 ```bash
 kubectl get pods -n kube-flannel
 kubectl logs -n kube-flannel <flannel-pod>
 ```
-**Solutions**:
-- Restart Flannel Pods
-- Check firewall configuration
-- Verify CNI plugins
+**解决方案**:
+- 重启 Flannel Pod
+- 检查防火墙配置
+- 验证 CNI 插件
 
-#### Issue 3: GPU Not Visible
-**Symptoms**: Pods cannot access GPU
-**Diagnosis**:
+#### 问题 3: GPU 不可见
+**症状**: Pod 无法访问 GPU
+**诊断**:
 ```bash
 kubectl get nodes -o yaml | grep nvidia.com/gpu
 kubectl get pods -n gpu-operator
 ```
-**Solutions**:
-- Check NVIDIA drivers
-- Restart GPU Operator components
-- Verify containerd configuration
+**解决方案**:
+- 检查 NVIDIA 驱动
+- 重启 GPU Operator 组件
+- 验证 containerd 配置
 
-#### Issue 4: Storage Access Issues
-**Symptoms**: PVC stuck in Pending state
-**Diagnosis**:
+#### 问题 4: 存储访问问题
+**症状**: PVC 卡在 Pending 状态
+**诊断**:
 ```bash
 kubectl describe pvc <pvc-name>
 kubectl get storageclass
 ```
-**Solutions**:
-- Check local-path-provisioner status
-- Verify node storage space
-- Check permission configuration
+**解决方案**:
+- 检查 local-path-provisioner 状态
+- 验证节点存储空间
+- 检查权限配置
 
-### Log Viewing Commands
+### 日志查看命令
 
 ```bash
-# View kubelet logs
+# 查看 kubelet 日志
 sudo journalctl -u kubelet -f
 
-# View containerd logs
+# 查看 containerd 日志
 sudo journalctl -u containerd -f
 
-# View Pod logs
+# 查看 Pod 日志
 kubectl logs <pod-name> -n <namespace>
 
-# View previous container instance logs
+# 查看前一个容器实例的日志
 kubectl logs <pod-name> --previous
 
-# View all container logs
+# 查看所有容器日志
 kubectl logs <pod-name> --all-containers=true
 ```
 
-## Cluster Maintenance
+## 集群维护
 
-### Regular Maintenance Tasks
+### 定期维护任务
 
-#### 1. System Updates
+#### 1. 系统更新
 ```bash
-# Monthly system updates
+# 每月执行系统更新
 sudo apt update && sudo apt upgrade -y
 
-# Update containerd (proceed with caution)
+# 更新 containerd（谨慎操作）
 sudo apt update && sudo apt install containerd.io
 sudo systemctl restart containerd
 ```
 
-#### 2. Backup Critical Configurations
+#### 2. 备份关键配置
 ```bash
-# Backup Kubernetes configuration
+# 备份 Kubernetes 配置
 sudo cp -r /etc/kubernetes /backup/kubernetes-$(date +%Y%m%d)
 
-# Backup etcd data
+# 备份 etcd 数据
 sudo ETCDCTL_API=3 etcdctl snapshot save /backup/etcd-snapshot-$(date +%Y%m%d).db \
   --endpoints=https://127.0.0.1:2379 \
   --cacert=/etc/kubernetes/pki/etcd/ca.crt \
@@ -1391,97 +1379,97 @@ sudo ETCDCTL_API=3 etcdctl snapshot save /backup/etcd-snapshot-$(date +%Y%m%d).d
   --key=/etc/kubernetes/pki/etcd/healthcheck-client.key
 ```
 
-#### 3. Clean Up Unused Resources
+#### 3. 清理无用资源
 ```bash
-# Clean up unused container images
+# 清理无用的容器镜像
 sudo ctr images prune
 
-# Clean up unused Kubernetes resources
+# 清理无用的 Kubernetes 资源
 kubectl delete pods --field-selector=status.phase=Succeeded -A
 kubectl delete pods --field-selector=status.phase=Failed -A
 ```
 
-### Monitoring Metrics
+### 监控指标
 
-Important monitoring metrics include:
-- Node CPU, memory, disk usage
-- Pod status and restart counts
-- GPU usage and temperature
-- Network traffic and latency
-- Storage I/O performance
+重要的监控指标包括：
+- 节点 CPU、内存、磁盘使用率
+- Pod 状态和重启次数
+- GPU 使用率和温度
+- 网络流量和延迟
+- 存储 I/O 性能
 
-## Complete Uninstallation
+## 完全卸载
 
-If you need to completely remove the Kubernetes cluster:
+如果需要完全删除 Kubernetes 集群：
 
 ```bash
-# Reset kubeadm
+# 重置 kubeadm
 sudo kubeadm reset -f
 
-# Delete configuration files
+# 删除配置文件
 sudo rm -rf /etc/kubernetes
 sudo rm -rf ~/.kube
 
-# Delete network configuration
+# 删除网络配置
 sudo rm -rf /etc/cni/net.d
 
-# Stop and disable services
+# 停止和禁用服务
 sudo systemctl stop kubelet containerd
 sudo systemctl disable kubelet containerd
 
-# Uninstall packages
+# 卸载包
 sudo apt remove -y kubeadm kubectl kubelet containerd.io
 sudo apt autoremove -y
 
-# Delete repository configuration
+# 删除仓库配置
 sudo rm -f /etc/apt/sources.list.d/kubernetes.list
 sudo rm -f /etc/apt/sources.list.d/docker.list
 
-# Delete data directories
+# 删除数据目录
 sudo rm -rf /var/lib/kubelet
 sudo rm -rf /var/lib/containerd
 sudo rm -rf /opt/cni
 
-# Restore system configuration
+# 恢复系统配置
 sudo rm -f /etc/modules-load.d/k8s.conf
 sudo rm -f /etc/sysctl.d/k8s.conf
 sudo sysctl --system
 
-# Restart system
+# 重启系统
 sudo reboot
 ```
 
-## Summary
+## 总结
 
-This document details the complete process of installing a single-node Kubernetes cluster on Ubuntu 24.04 system, including:
+本文档详细介绍了在 Ubuntu 24.04 系统上安装单节点 Kubernetes 集群的完整过程，包括：
 
-1. **Basic Environment Preparation**: System configuration, firewall, kernel parameters
-2. **Container Runtime**: containerd installation and configuration
-3. **Kubernetes Core**: kubeadm, kubelet, kubectl installation
-4. **Cluster Initialization**: Single-node cluster configuration
-5. **Network Plugin**: Flannel network solution
-6. **Storage System**: local-path-provisioner local storage
-7. **Load Balancing**: NGINX Ingress Controller
-8. **Monitoring System**: Prometheus + Grafana complete monitoring
-9. **Management Interface**: Kubernetes Dashboard
-10. **GPU Support**: NVIDIA GPU Operator configuration
+1. **基础环境准备**: 系统配置、防火墙、内核参数
+2. **容器运行时**: containerd 安装和配置
+3. **Kubernetes 核心**: kubeadm、kubelet、kubectl 安装
+4. **集群初始化**: 单节点集群配置
+5. **网络插件**: Flannel 网络方案
+6. **存储系统**: local-path-provisioner 本地存储
+7. **负载均衡**: NGINX Ingress Controller
+8. **监控系统**: Prometheus + Grafana 完整监控
+9. **管理界面**: Kubernetes Dashboard
+10. **GPU 支持**: NVIDIA GPU Operator 配置
 
-This configuration solution balances functionality completeness and resource efficiency, suitable for development, testing, and small-scale production environments.
+该配置方案兼顾了功能完整性和资源效率，适合开发、测试和小规模生产环境使用。
 
-## Next Steps
+## 下一步
 
-After cluster installation is complete, you can:
-1. Deploy applications to the cluster
-2. Configure CI/CD pipelines
-3. Integrate external services
-4. Optimize performance and security configuration
-5. Extend cluster functionality
+集群安装完成后，您可以：
+1. 部署应用程序到集群
+2. 配置 CI/CD 流水线
+3. 集成外部服务
+4. 优化性能和安全配置
+5. 扩展集群功能
 
-## References
+## 参考资料
 
-- [Kubernetes Official Documentation](https://kubernetes.io/docs/)
-- [containerd Official Documentation](https://containerd.io/docs/)
-- [Flannel Documentation](https://github.com/flannel-io/flannel)
+- [Kubernetes 官方文档](https://kubernetes.io/docs/)
+- [containerd 官方文档](https://containerd.io/docs/)
+- [Flannel 文档](https://github.com/flannel-io/flannel)
 - [NGINX Ingress Controller](https://kubernetes.github.io/ingress-nginx/)
 - [Prometheus Operator](https://prometheus-operator.dev/)
 - [NVIDIA GPU Operator](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/overview.html)

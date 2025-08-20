@@ -11,7 +11,7 @@ This guide describes how to install and configure Tekton Triggers for event-driv
 
 ## 🔧 Prerequisites
 
-- ✅ Completed [Tekton Core Installation](01-tekton-installation.md)
+- ✅ Completed [Tekton Core Installation](04-tekton-installation.md)
 - ✅ Tekton Pipelines running normally
 - ✅ kubectl access permissions
 
@@ -354,4 +354,4 @@ After Triggers configuration is complete, you can:
 1. Configure GitHub Webhooks (automated CI/CD)
 2. Deploy GPU scientific computing Pipeline
 
-Continue reading: [03-tekton-webhook-configuration.md](03-tekton-webhook-configuration.md) 
+Continue reading: [06-tekton-webhook-configuration.md](06-tekton-webhook-configuration.md) 

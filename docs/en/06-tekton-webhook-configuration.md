@@ -11,7 +11,7 @@ This guide provides detailed instructions for configuring GitHub Webhooks with T
 
 ## 🔧 Prerequisites
 
-- ✅ Completed [Tekton Triggers Setup](02-tekton-triggers-setup.md)
+- ✅ Completed [Tekton Triggers Setup](05-tekton-triggers-setup.md)
 - ✅ GitHub repository management permissions
 - ✅ EventListener service externally accessible
 
@@ -537,4 +537,4 @@ After Webhook configuration is complete, you can:
 1. Deploy GPU scientific computing Pipeline
 2. Configure more complex CI/CD workflows
 
-Continue reading: [04-gpu-pipeline-deployment.md](04-gpu-pipeline-deployment.md) 
+Continue reading: [07-gpu-pipeline-deployment.md](07-gpu-pipeline-deployment.md) 

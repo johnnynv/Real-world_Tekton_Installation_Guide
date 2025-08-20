@@ -519,4 +519,4 @@ After installation, you can:
 2. Set up GitHub Webhooks (CI/CD integration)  
 3. Deploy GPU Pipeline (scientific computing workflows)
 
-Continue reading: [02-tekton-triggers-setup.md](02-tekton-triggers-setup.md) 
+Continue reading: [05-tekton-triggers-setup.md](05-tekton-triggers-setup.md) 

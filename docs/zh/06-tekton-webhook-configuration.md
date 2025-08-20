@@ -11,7 +11,7 @@
 
 ## 🔧 前提条件
 
-- ✅ 已完成 [Tekton Triggers 配置](02-tekton-triggers-setup.md)
+- ✅ 已完成 [Tekton Triggers 配置](05-tekton-triggers-setup.md)
 - ✅ 拥有 GitHub 仓库管理权限
 - ✅ EventListener 服务可外部访问
 
@@ -660,4 +660,4 @@ Webhook 配置完成后，您可以：
 1. 部署 GPU 科学计算 Pipeline
 2. 配置更复杂的 CI/CD 流程
 
-继续阅读：[04-gpu-pipeline-deployment.md](04-gpu-pipeline-deployment.md) 
+继续阅读：[07-gpu-pipeline-deployment.md](07-gpu-pipeline-deployment.md) 
