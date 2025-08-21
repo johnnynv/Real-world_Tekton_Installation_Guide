@@ -1,654 +1,130 @@
-# Tekton GPU Pipeline Deployment Troubleshooting
+# Tekton Troubleshooting Guide for Rocky Linux Environment
 
-This document records issues discovered during deployment and their solutions.
+This guide documents common issues encountered during Tekton installation and configuration in Rocky Linux + Kubernetes environments and their solutions.
 
-## 📋 Common Issues
+## 🚨 Common Issues and Solutions
 
-### 1. kubectl Command Issues
+### Issue 1: Dashboard Access Forbidden Errors
 
-#### Issue: `kubectl version --short` not supported
-**Error Message**:
-```
-error: unknown flag: --short
-See 'kubectl version --help' for usage.
-```
-
-**Cause**: Recent kubectl versions have removed the `--short` parameter
-
-**Solution**:
-```bash
-# Incorrect command
-kubectl version --short
-
-# Correct command
-kubectl version
-```
-
-**Status**: Documentation fixed
-
----
-
-### 2. Git Clone Safety Handling Issues
-
-#### Issue: Git clone fails on repeated pipeline runs
-**Error Message**:
-```
-fatal: destination path 'source' already exists and is not an empty directory.
-```
-
-**Cause**: Residual files from previous pipeline runs exist in workspace
-
-**Solution**: Automatic backup and safety handling mechanism
-
-Our safe git clone implementation includes:
-- **Automatic directory backup**: Creates timestamped backup when existing directory detected
-- **Retry mechanism**: Auto-retry on clone failure (up to 3 attempts)
-- **Rollback capability**: Can automatically restore backup on failure
-- **Detailed logging**: Timestamped detailed operation logs
-
-**Safety handling process**:
-```bash
-# 1. Check if directory exists
-if [ -d "${TARGET_DIR}" ]; then
-  # 2. Create timestamped backup
-  TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
-  BACKUP_DIR="${TARGET_DIR}_backup_${TIMESTAMP}"
-  mv "${TARGET_DIR}" "${BACKUP_DIR}"
-fi
-
-# 3. Execute git clone (with retry)
-for attempt in $(seq 1 ${MAX_RETRIES}); do
-  if git clone "${REPO_URL}" "${TARGET_DIR}"; then
-    break
-  fi
-  # Clean up failed partial clone
-  rm -rf "${TARGET_DIR}"
-  sleep $((attempt * 5))  # Exponential backoff
-done
-```
-
-**Updated Task components**:
-1. **gpu-env-preparation-task-fixed.yaml** - Added automatic backup mechanism
-2. **pytest-execution-task.yaml** - Safe handling for test repository clone
-3. **safe-git-clone-task.yaml** (new) - Independent safe git clone task
-
-**Cleaning backup directories**:
-```bash
-# Clean backups older than 7 days
-find /workspace -name "*_backup_*" -type d -mtime +7 -exec rm -rf {} +
-```
-
-**Status**: Fixed and enhanced with safety measures
-
----
-
-### 3. Environment Cleanup Issues
-
-#### Issue: Existing Tekton components cause deployment conflicts
 **Symptoms**:
-- Resource already exists errors during installation
-- EventListener in CrashLoopBackOff state
-- Cannot create new Pipeline resources
+- Some menus in Tekton Dashboard show "Forbidden" errors
+- API calls return 403 status codes
+- Error message: "User 'system:anonymous' cannot list resource"
 
-**Solution**:
+**Problem Analysis**:
+1. Dashboard configuration has `--read-only=true` parameter limiting write operations
+2. Ingress configuration missing HTTP Basic Auth authentication
+3. Incomplete RBAC permission configuration
+
+**Solution Steps**:
+
+#### Step 1: Fix Dashboard Configuration
 ```bash
-# Execute complete environment cleanup
-chmod +x scripts/cleanup/clean-tekton-environment.sh
-./scripts/cleanup/clean-tekton-environment.sh
+# Remove read-only restriction
+kubectl patch deployment tekton-dashboard -n tekton-pipelines \
+  --type='json' -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/args/6", "value": "--read-only=false"}]'
+
+# Wait for deployment to complete
+kubectl rollout status deployment/tekton-dashboard -n tekton-pipelines
 ```
 
-**Verify cleanup completion**:
+#### Step 2: Configure HTTP Basic Auth
 ```bash
-# Should have no output
-kubectl get namespaces | grep tekton
-kubectl get pods --all-namespaces | grep tekton
+# Add authentication configuration to Dashboard Ingress
+kubectl patch ingress tekton-dashboard-ingress -n tekton-pipelines \
+  --type='merge' -p='{"metadata":{"annotations":{"nginx.ingress.kubernetes.io/auth-type":"basic","nginx.ingress.kubernetes.io/auth-secret":"tekton-basic-auth","nginx.ingress.kubernetes.io/auth-realm":"Tekton Dashboard Authentication"}}}'
 ```
 
----
+#### Step 3: Verify Fix Results
+```bash
+# Test Dashboard API access
+curl -H "Host: tekton.10.78.14.61.nip.io" \
+  -u admin:admin123 \
+  https://localhost:30443/api/v1/namespaces -k
 
-### 4. Tekton API Version Issues
-
-#### Issue: resources field position error in Task definition
-**Error Message**:
-```
-error when creating: Task in version "v1" cannot be handled as a Task: strict decoding error: unknown field "spec.steps[0].resources"
-```
-
-**Cause**: In Tekton v1 API, resource definitions should use `computeResources`
-
-**Solution**:
-```yaml
-# Incorrect configuration
-spec:
-  steps:
-  - name: step
-    resources:
-      limits:
-        nvidia.com/gpu: "1"
-
-# Correct configuration
-spec:
-  steps:
-  - name: step
-    computeResources:
-      limits:
-        nvidia.com/gpu: "1"
+# Test Tekton API access
+curl -H "Host: tekton.10.78.14.61.nip.io" \
+  -u admin:admin123 \
+  https://localhost:30443/apis/tekton.dev/v1/namespaces/tekton-pipelines/pipelines -k
 ```
 
----
+**Expected Results**:
+- ✅ Dashboard API returns 200 status code
+- ✅ Can normally access namespaces list
+- ✅ Tekton resource APIs work normally
+- ✅ No more Forbidden errors
 
-### 5. Dynamic Parameter Issues
+### Issue 2: Webhook Domain Access Configuration
 
-#### Issue: Resource quantities must match regular expression
-**Error Message**:
-```
-quantities must match the regular expression '^([+-]?[0-9.]+)([eEinumkKMGTP]*[-+]?[0-9]*)$'
-```
-
-**Cause**: Tekton doesn't accept dynamic parameters as resource quantity values
-
-**Solution**:
-```yaml
-# Incorrect configuration
-computeResources:
-  limits:
-    nvidia.com/gpu: $(params.gpu-count)
-
-# Correct configuration
-computeResources:
-  limits:
-    nvidia.com/gpu: "1"
-```
-
----
-
-### 6. YAML Format Issues
-
-#### Issue: Complex multi-line scripts cause YAML parsing errors
-**Error Message**:
-```
-error converting YAML to JSON: yaml: line X: could not find expected ':'
-```
-
-**Cause**: Python script block indentation issues
-
-**Solution**:
-Simplify complex Python scripts, use simpler shell commands:
-
-```yaml
-# Complex Python script (error-prone)
-script: |
-  python3 << 'EOF'
-  import json
-  # Complex logic
-  EOF
-
-# Simplified shell commands (recommended)
-script: |
-  #!/bin/bash
-  echo "Simple validation"
-  grep -q "pattern" file || echo "Not found"
-```
-
----
-
-### 7. Dashboard Access Issues
-
-#### Issue: Dashboard login succeeds but content keeps loading
 **Symptoms**:
-- Can enter username/password and login
-- After login, page is blank or shows continuous loading
-- Network requests show 401/403 errors
-
-**Cause**: Dashboard read-only mode or insufficient permissions
+- Webhook only accessible via NodePort ports
+- Cannot access via *.nip.io domain
+- External systems cannot trigger Pipelines
 
 **Solution**:
-```bash
-# Fix dashboard read-only mode
-bash scripts/utils/fix-dashboard-readonly.sh
-
-# Verify dashboard status
-kubectl get pods -n tekton-pipelines | grep dashboard
-kubectl logs -n tekton-pipelines deployment/tekton-dashboard
+Webhook has been configured with correct ingress and can be accessed via:
 ```
+http://webhook.10.78.14.61.nip.io
+```
+
+**Verification Method**:
+```bash
+# Test webhook endpoint access
+curl -H "Host: webhook.10.78.14.61.nip.io" \
+  http://localhost:30080/ -I
+
+# Expected to return 400 status code (normal, missing webhook payload)
+```
+
+## 🔧 System Configuration Checklist
+
+### Dashboard Configuration Check
+- [ ] `--read-only=false` parameter is set
+- [ ] HTTP Basic Auth is configured
+- [ ] RBAC permissions are correctly bound
+- [ ] Ingress configuration is complete
+
+### Webhook Configuration Check
+- [ ] EventListener is running normally
+- [ ] Ingress configuration is correct
+- [ ] Domain resolution is normal
+- [ ] Port mapping is correct
+
+### Network Configuration Check
+- [ ] Nginx Ingress Controller is running normally
+- [ ] TLS certificate configuration is correct
+- [ ] Port mapping configuration is correct
+- [ ] Firewall rules allow access
+
+## 📋 Access Information Summary
+
+### Dashboard Access
+- **URL**: https://tekton.10.78.14.61.nip.io
+- **Authentication**: admin / admin123
+- **Port**: 30443 (HTTPS)
+
+### Webhook Access
+- **URL**: http://webhook.10.78.14.61.nip.io
+- **Port**: 30080 (HTTP)
+- **Purpose**: Git platform webhook integration
+
+## 🚀 Preventive Measures
+
+1. **Regular Configuration Checks**: Check Dashboard and Webhook configuration monthly
+2. **Log Monitoring**: Monitor Dashboard and Ingress log output
+3. **Permission Auditing**: Regularly check if RBAC configuration is correct
+4. **Configuration Backup**: Backup important configuration files
+
+## 📞 Technical Support
+
+If encountering other issues, please check:
+1. Kubernetes cluster status
+2. Tekton component logs
+3. Ingress Controller status
+4. Network connectivity
 
 ---
 
-### 8. GPU Memory Management Issues
-
-#### Issue: RAPIDS Memory Manager (RMM) initialization failures
-**Error Message**:
-```
-RuntimeError: RMM has not been initialized
-```
-
-**Cause**: GPU tasks don't properly initialize RMM before using RAPIDS libraries
-
-**Solution**:
-Use init containers with proper RMM initialization:
-
-```yaml
-initContainers:
-- name: init-rmm
-  image: rapidsai/rapidsai:22.12-cuda11.5-runtime-ubuntu20.04-py3.9
-  script: |
-    #!/bin/bash
-    python3 -c "
-    import rmm
-    rmm.reinitialize(pool_allocator=True, initial_pool_size=1024**3)
-    print('RMM initialized successfully')
-    "
-```
-
----
-
-### 9. Pipeline Run ID Issues
-
-#### Issue: Pipeline artifacts use generic names instead of run-specific IDs
-**Problem**: Artifacts from different pipeline runs overwrite each other
-
-**Solution**: Extract proper pipeline run ID for directory structure:
-
-```bash
-# Get Pipeline Run ID using multiple methods for reliability
-PIPELINE_RUN_NAME=""
-if [ -f "/tekton/run/name" ]; then
-  PIPELINE_RUN_NAME=$(cat /tekton/run/name)
-elif [ -n "${TEKTON_PIPELINERUN_NAME:-}" ]; then
-  PIPELINE_RUN_NAME="$TEKTON_PIPELINERUN_NAME"
-fi
-
-# Extract short ID (last 5 characters)
-PIPELINE_RUN_ID=$(echo $PIPELINE_RUN_NAME | sed 's/.*-\([a-z0-9]\{5\}\)$/\1/')
-
-# Create dedicated directory structure
-RUN_DIR="pipeline-runs/run-${PIPELINE_RUN_ID}"
-```
-
----
-
-### 10. Test Framework Integration Issues
-
-#### Issue: pytest execution fails with missing dependencies
-**Error Message**:
-```
-pytest: error: unrecognized arguments: --cov=./ --cov-report=xml
-```
-
-**Cause**: Missing pytest plugins in Poetry environment
-
-**Solution**:
-```bash
-# Install Poetry and dependencies
-poetry install
-poetry run pip install pytest-cov pytest-html
-
-# Execute tests with proper plugins
-poetry run pytest -m fast --cov=./ --cov-report=xml --junitxml=results.xml
-```
-
----
-
-## 🔧 Verification Commands
-
-### Check Tekton Installation
-```bash
-# Verify all components
-kubectl get pods -n tekton-pipelines
-kubectl get pods -n tekton-pipelines-resolvers
-
-# Check dashboard access
-curl -k https://tekton.<NODE_IP>.nip.io
-```
-
-### Monitor Pipeline Execution
-```bash
-# Watch pipeline runs
-kubectl get pipelinerun -n tekton-pipelines -w
-
-# Check pipeline logs
-tkn pipelinerun logs <pipeline-run-name> -f
-```
-
-### Validate GPU Access
-```bash
-# Test GPU availability in cluster
-kubectl run gpu-test --rm -it --restart=Never --image=nvidia/cuda:11.5-runtime-ubuntu20.04 -- nvidia-smi
-```
-
-## 🚀 Performance Optimization
-
-### Dashboard Performance
-- **Resource Limits**: Increase dashboard memory to 512Mi
-- **Log Retention**: Limit log retention to reduce storage
-- **History Cleanup**: Regularly clean old pipeline runs
-
-### Pipeline Optimization
-- **Parallel Execution**: Use `runAfter` dependencies efficiently
-- **Resource Sharing**: Reuse workspaces between tasks
-- **Image Caching**: Use consistent base images for faster startup
-
-## 📞 Getting Help
-
-1. **Check Logs**: Always start with `kubectl logs` and `tkn pipelinerun logs`
-2. **Verify Resources**: Use `kubectl describe` for detailed resource status
-3. **Network Issues**: Test connectivity to required external services
-4. **GPU Issues**: Verify GPU drivers and NVIDIA runtime installation
-
----
-
-### 11. Tekton Dashboard Restricted User Permission Configuration Issues (Important Case)
-
-#### Issue: Dashboard login succeeds but permissions not effective
-**Symptoms**:
-- Can successfully login with user/user123 to Dashboard
-- After login, can still see "Create" button and all menu items
-- Permission restrictions seem not to be effective
-
-### Complete Diagnosis and Resolution Process
-
-#### Problem 1: Dashboard inaccessible (HTTP 503)
-**Error Message**:
-```
-HTTP 503 Service Temporarily Unavailable
-```
-
-**Root Cause**: Basic authentication Secret configuration error
-- Secret uses key name `users.htpasswd` 
-- Nginx Ingress expects key name `auth`
-
-**Solution**:
-```bash
-# 1. Extract existing htpasswd content
-HTPASSWD_CONTENT=$(kubectl get secret tekton-dashboard-auth -n tekton-pipelines -o jsonpath='{.data.users\.htpasswd}' | base64 -d)
-
-# 2. Delete incorrect Secret
-kubectl delete secret tekton-dashboard-auth -n tekton-pipelines
-
-# 3. Recreate correct Secret
-kubectl create secret generic tekton-dashboard-auth \
-  --from-literal=auth="$HTPASSWD_CONTENT" \
-  -n tekton-pipelines
-
-# 4. Verify fix
-curl -k -u "user:user123" https://tekton.10.34.2.129.nip.io/
-```
-
-#### Problem 2: Dashboard permission configuration error
-**Symptoms**: Login succeeds but can see Create button
-
-**Root Cause**: Dashboard ServiceAccount has excessive permissions
-- `tekton-dashboard` ServiceAccount bound to high-privilege ClusterRoles
-- These ClusterRoles have `[*]` full permissions, not restricted read-only permissions
-
-**Solution**:
-```bash
-# 1. Delete high-privilege bindings
-kubectl delete clusterrolebinding tekton-dashboard-backend-edit
-kubectl delete clusterrolebinding tekton-dashboard-pipelines-view  
-kubectl delete clusterrolebinding tekton-dashboard-tenant-view
-kubectl delete clusterrolebinding tekton-dashboard-triggers-view
-
-# 2. Create restricted permission binding
-kubectl create clusterrolebinding tekton-dashboard-restricted \
-  --clusterrole=tekton-restricted-viewer \
-  --serviceaccount=tekton-pipelines:tekton-dashboard
-
-# 3. Restart Dashboard to apply permissions
-kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
-kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
-```
-
-#### Problem 3: Dashboard still shows unauthorized menu items
-**Symptoms**: Although Create button disappears, can still see "other menus"
-
-**Root Cause Analysis**:
-1. **Dashboard read-only mode not enabled**: `--read-only=false` allows UI to display edit functions
-2. **ClusterRole permissions too broad**: `tekton-restricted-viewer` still includes permissions for Triggers-related resources
-
-**Complete Solution**:
-```bash
-# 1. Enable Dashboard read-only mode
-kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
-  {
-    "op": "replace", 
-    "path": "/spec/template/spec/containers/0/args",
-    "value": [
-      "--default-namespace=",
-      "--external-logs=", 
-      "--log-format=json",
-      "--log-level=info",
-      "--logout-url=",
-      "--namespaces=",
-      "--pipelines-namespace=tekton-pipelines",
-      "--port=9097",
-      "--read-only=true",
-      "--stream-logs=true", 
-      "--triggers-namespace=tekton-pipelines"
-    ]
-  }
-]'
-
-# 2. Update ClusterRole to more strict permissions
-kubectl apply -f - <<EOF
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: tekton-restricted-viewer
-  labels:
-    app.kubernetes.io/component: dashboard
-    app.kubernetes.io/part-of: tekton-dashboard
-rules:
-# Only allow access to basic Tekton resources
-- apiGroups: ["tekton.dev"]
-  resources: ["pipelines", "pipelineruns", "tasks", "taskruns", "eventlisteners"]
-  verbs: ["get", "list", "watch"]
-# Basic Kubernetes resources
-- apiGroups: [""]
-  resources: ["configmaps", "namespaces", "pods", "pods/log"]
-  verbs: ["get", "list", "watch"]
-EOF
-
-# 3. Restart Dashboard
-kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
-kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
-```
-
-### Verify Permission Restrictions
-
-**Permission test commands**:
-```bash
-# Test Dashboard ServiceAccount permissions
-kubectl auth can-i list triggers.triggers.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard
-# Should return: no
-
-kubectl auth can-i list clustertasks.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard  
-# Should return: no
-```
-
-### Important Behavior Notes
-
-**✅ Normal Dashboard Behavior**:
-- **Static menu display**: All menu items are displayed, this is Tekton Dashboard's design
-- **Permission verification on click**: Shows permission errors or empty lists when accessing restricted resources
-- **Read-only mode effective**: Does not display Create, Edit, Delete operation buttons
-
-**🧪 User verification steps**:
-1. **Refresh browser page** (Ctrl+F5)
-2. **Click restricted menu items** to verify permissions:
-   - Triggers → Should show permission error
-   - ClusterTasks → Should show permission error  
-   - CustomRuns → Should show permission error
-3. **Confirm allowed menu items** display normally:
-   - Pipelines ✅
-   - PipelineRuns ✅  
-   - Tasks ✅
-   - TaskRuns ✅
-   - EventListeners ✅
-
-### Key Configuration Files
-
-**Restricted user RBAC configuration** (`examples/config/rbac/rbac-step5-tekton-restricted-user.yaml`):
-```yaml
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: tekton-restricted-viewer
-rules:
-- apiGroups: ["tekton.dev"]
-  resources: ["pipelines", "pipelineruns", "tasks", "taskruns", "eventlisteners"]
-  verbs: ["get", "list", "watch"]
-```
-
-**Basic authentication configuration**:
-```bash
-# Correct Secret format
-kubectl create secret generic tekton-dashboard-auth \
-  --from-literal=auth="user:$2y$10$..." \
-  -n tekton-pipelines
-```
-
-### Status
-
-- ✅ **HTTP 503 issue**: Resolved (Secret key correction)
-- ✅ **Excessive permissions issue**: Resolved (ClusterRole restriction)  
-- ✅ **Menu display issue**: Resolved (read-only mode + permission refinement)
-- ✅ **Access verification**: Confirmed permissions work as expected
-
-**Important conclusion**: Tekton Dashboard's menu is statically displayed, permission restrictions take effect at the API access level. This is normal design behavior that ensures UI consistency while implementing effective access control.
-
-#### Problem 4: Admin user permissions incorrectly restricted
-**Symptoms**: After fixing restricted user, admin user also cannot see Create buttons
-
-**Root Cause**: During user permission fixing, Dashboard ServiceAccount was restricted to read-only permissions, affecting all users including admin
-
-**Solution**:
-```bash
-# 1. Create comprehensive admin ClusterRole
-kubectl apply -f - <<EOF
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: tekton-dashboard-admin
-  labels:
-    app.kubernetes.io/component: dashboard
-    app.kubernetes.io/part-of: tekton-dashboard
-rules:
-# Tekton resources full permissions
-- apiGroups: ["tekton.dev"]
-  resources: ["*"]
-  verbs: ["*"]
-- apiGroups: ["triggers.tekton.dev"]
-  resources: ["*"]
-  verbs: ["*"]
-# Kubernetes core resource permissions
-- apiGroups: [""]
-  resources: ["namespaces", "pods", "pods/log", "events", "configmaps", "secrets", "services"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["apps"]
-  resources: ["deployments", "replicasets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-- apiGroups: ["apiextensions.k8s.io"]
-  resources: ["customresourcedefinitions"]
-  verbs: ["get", "list", "watch"]
-- apiGroups: ["metrics.k8s.io"]
-  resources: ["*"]
-  verbs: ["get", "list"]
-EOF
-
-# 2. Update Dashboard ServiceAccount permission binding
-kubectl delete clusterrolebinding tekton-dashboard-restricted
-kubectl create clusterrolebinding tekton-dashboard-admin \
-  --clusterrole=tekton-dashboard-admin \
-  --serviceaccount=tekton-pipelines:tekton-dashboard
-
-# 3. Disable read-only mode, enable full functionality
-kubectl patch deployment tekton-dashboard -n tekton-pipelines --type='json' -p='[
-  {
-    "op": "replace", 
-    "path": "/spec/template/spec/containers/0/args",
-    "value": [
-      "--default-namespace=",
-      "--external-logs=", 
-      "--log-format=json",
-      "--log-level=info",
-      "--logout-url=",
-      "--namespaces=",
-      "--pipelines-namespace=tekton-pipelines",
-      "--port=9097",
-      "--read-only=false",
-      "--stream-logs=true", 
-      "--triggers-namespace=tekton-pipelines"
-    ]
-  }
-]'
-
-# 4. Restart Dashboard to apply changes
-kubectl rollout restart deployment tekton-dashboard -n tekton-pipelines
-kubectl rollout status deployment tekton-dashboard -n tekton-pipelines
-```
-
-**Verify admin permissions restored**:
-```bash
-# Test management permissions
-kubectl auth can-i create pipelines.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard
-# Should return: yes
-
-kubectl auth can-i delete pipelineruns.tekton.dev --as=system:serviceaccount:tekton-pipelines:tekton-dashboard  
-# Should return: yes
-```
-
-#### Problem 5: Admin user login credentials lost
-**Symptoms**: admin / admin123 cannot login, shows authentication failure
-
-**Root Cause**: When recreating authentication Secret, only user information was preserved, admin user was omitted
-
-**Solution**:
-```bash
-# 1. Generate admin user password hash
-htpasswd -nbB admin admin123
-# Output: admin:$2y$05$1Sw1dzYQu4847hA0RVhJNuOfukIdCgCy4uTM3480ZrOTVmwE2MjXS
-
-# 2. Create htpasswd file containing both users
-cat > /tmp/htpasswd_combined << 'EOF'
-admin:$2y$05$1Sw1dzYQu4847hA0RVhJNuOfukIdCgCy4uTM3480ZrOTVmwE2MjXS
-user:$apr1$U0O.x6U3$P9Ed5mlwqKCvQZoz6bilG/
-EOF
-
-# 3. Recreate authentication Secret
-kubectl delete secret tekton-dashboard-auth -n tekton-pipelines
-kubectl create secret generic tekton-dashboard-auth \
-  --from-file=auth=/tmp/htpasswd_combined \
-  -n tekton-pipelines
-
-# 4. Clean up temporary file
-rm /tmp/htpasswd_combined
-```
-
-**Verify both users can login**:
-```bash
-# Test admin login
-curl -k -u "admin:admin123" -s -o /dev/null -w "Admin status: %{http_code}\n" https://tekton.10.34.2.129.nip.io/
-
-# Test user login  
-curl -k -u "user:user123" -s -o /dev/null -w "User status: %{http_code}\n" https://tekton.10.34.2.129.nip.io/
-# Both should return: 200
-```
-
-### Final User Permission Configuration
-
-**Correct dual-user configuration**:
-
-| Username | Password | Dashboard Permissions | Backend Permissions | Functionality |
-|----------|----------|----------------------|---------------------|---------------|
-| `admin` | `admin123` | Full admin permissions | tekton-dashboard-admin | Can create, edit, delete all resources |
-| `user` | `user123` | Restricted read-only | Via menu click permission check | Can only view allowed resources, restricted resources show permission errors |
-
-**Important architecture understanding**:
-- **Authentication level**: Nginx Basic Auth controls who can login
-- **Authorization level**: Dashboard ServiceAccount determines backend API permissions  
-- **User experience**: Different users see same menus, but have different access permissions
-
----
-
-**Note**: This troubleshooting guide covers real-world issues encountered during production deployments. Each solution has been tested and validated.
+**Last Updated**: 2025-08-21
+**Version**: v1.0
+**Status**: Resolved

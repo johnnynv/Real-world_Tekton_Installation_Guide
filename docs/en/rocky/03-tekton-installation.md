@@ -385,3 +385,10 @@ Successfully completed the installation of the complete Tekton platform! You can
 **👤 Login Credentials**: admin / admin123
 
 Enjoy your Tekton CI/CD journey!
+
+## 🚨 Troubleshooting
+
+If you encounter issues during use, please refer to:
+- [Troubleshooting Guide](00-troubleshooting-on-rocky.md) - Common issues and solutions
+- [Webhook Configuration Guide](05-tekton-webhook-configuration.md) - Webhook integration configuration
+- [User Permission Configuration](06-tekton-restricted-user-setup.md) - User permission management
